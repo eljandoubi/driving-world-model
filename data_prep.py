@@ -22,7 +22,6 @@ if __name__ == "__main__":
     for d in tqdm(ds):
         if d["run_id"] not in runids:
             i=-1
-            print("\nnew run",d["run_id"])
             runids.append(d["run_id"])
 
         assert i<d["frame"], "data must be sorted"

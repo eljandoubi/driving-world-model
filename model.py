@@ -58,10 +58,12 @@ if __name__ == "__main__":
     im_s = model.unet.config.sample_size * 4
     print(im_s)
     in_c = model.unet.config.in_channels
+    mean = [0.4738, 0.4824, 0.4592, 1.0000]
+    std = [0.2823, 0.2809, 0.2801, 1e-8]
     transform = transforms.Compose([
         transforms.Resize((im_s, im_s)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5]*in_c, std=[0.5]*in_c)
+        transforms.Normalize(mean=mean, std=std)
     ])
     x_t = transform(frames["frame_t"]).unsqueeze(0).cuda()
     x_tp1 = transform(frames["frame_tp1"]).unsqueeze(0).cuda()
