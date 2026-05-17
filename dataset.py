@@ -66,16 +66,3 @@ class StreamDataset(IterableDataset):
             current_data["x_tp1"] = data["x_t"]
             yield current_data
             current_data = data
-
-
-if __name__ == "__main__":
-    from torch.utils.data import DataLoader
-
-    ds = StreamDataset()
-    k = 4
-    dt = DataLoader(ds, num_workers=k, batch_size=4)
-    for i, s in enumerate(dt):
-        for k, v in s.items():
-            print(i, ";", k, ":", v.shape)
-        if i > 10:
-            break

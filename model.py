@@ -59,31 +59,3 @@ class WorldModel(nn.Module):
             sample=x_t, timestep=t, encoder_hidden_states=cond
         ).sample
         return x_tp1_pred
-
-
-if __name__ == "__main__":
-    from torchvision import transforms
-    from tqdm import tqdm
-
-    from data_prep import frames
-
-    model = WorldModel().cuda()
-    im_s = model.unet.config.sample_size * 4  # pyright: ignore[reportAttributeAccessIssue]
-    print(im_s)
-    mean = [0.4738, 0.4824, 0.4592, 1.0000]
-    std = [0.2823, 0.2809, 0.2801, 1e-8]
-    transform = transforms.Compose(
-        [
-            transforms.Resize((im_s, im_s)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
-        ]
-    )
-    x_t = transform(frames["frame_t"]).unsqueeze(0).cuda()
-    x_tp1 = transform(frames["frame_tp1"]).unsqueeze(0).cuda()
-    a_t = torch.tensor(frames["action"]).unsqueeze(0).cuda()
-    for _ in tqdm(range(1)):
-        with torch.inference_mode():
-            x_tp1_pred = model(a_t, x_t)
-            loss = nn.functional.mse_loss(x_tp1_pred, x_tp1)
-            print(loss)

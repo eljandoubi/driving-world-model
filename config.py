@@ -8,6 +8,7 @@ class TrainingConfig:
     """PINN training configuration."""
 
     num_tokens: int = 4
+    base_name: str = "runwayml/stable-diffusion-v1-5"
     hidden_dim: int = 1024
     activation: Literal[
         "gelu",
@@ -17,7 +18,9 @@ class TrainingConfig:
         "swiglu",
         "linear-silu",
     ] = "swiglu"
-    learning_rate: float = 1e-3
+    learning_rate: float = 1e-4
+    image_size: int = 256
+    num_workers: int = 8
     epochs: int = 100000
     max_grad_norm: float = 1.0
     batch_size: int = 8
@@ -33,6 +36,9 @@ class TrainingConfig:
     def __post_init__(self) -> None:
         assert self.num_tokens > 0, "num_tokens must be > 0"
         assert self.hidden_dim > 0, "hidden_dim must be > 0"
+        assert self.num_workers >= self.batch_size, (
+            "num_worker must be greater or equal to batch_size"
+        )
         assert self.activation in (
             "gelu",
             "gelu-approximate",
