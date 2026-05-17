@@ -47,7 +47,7 @@ if __name__ == "__main__":
     print(
         "frame",
         im_mean,
-        (im_2_sum / j - im_mean.pow(2)).pow(0.5),
+        (im_2_sum / j - im_mean.pow(2)).pow(0.5),  # pyright: ignore[reportAttributeAccessIssue]
         sep="\n*************\n",
     )
 

@@ -68,7 +68,7 @@ if __name__ == "__main__":
     from data_prep import frames
 
     model = WorldModel().cuda()
-    im_s = model.unet.config.sample_size * 4
+    im_s = model.unet.config.sample_size * 4  # pyright: ignore[reportAttributeAccessIssue]
     print(im_s)
     mean = [0.4738, 0.4824, 0.4592, 1.0000]
     std = [0.2823, 0.2809, 0.2801, 1e-8]
