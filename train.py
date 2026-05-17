@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from transformers import HfArgumentParser
 
 from config import TrainingConfig
-from dataset import StreamDataset
+from dataset import StreamDataset, ceil
 from model import WorldModel
 from validate import tqdm, validate_model
 
@@ -57,8 +57,11 @@ def main(config: TrainingConfig) -> None:
 
     optimizer = AdamW(model.parameters(), lr=config.learning_rate)
 
-    for batch in tqdm(dataloaders["train"], desc="training epoch"):
-        break
+    total = int(ceil(len(dataloaders["train"])) / float(config.batch_size))
+    pbar = tqdm(enumerate(dataloaders["train"], start=1), desc="training epoch", total=total)
+    cum_loss = 0.0
+    for i, batch in pbar:
+        
         model.train()
         optimizer.zero_grad(set_to_none=True)
         batch = batch.to(device)
@@ -67,6 +70,8 @@ def main(config: TrainingConfig) -> None:
         loss.backward()
         clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
         optimizer.step()
+        cum_loss += loss.item()
+        pbar.set_postfix(loss=cum_loss / i)
 
     test_loss = validate_model(model, dataloaders["test"], device, config.batch_size)
 
