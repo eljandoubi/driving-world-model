@@ -6,6 +6,14 @@ from torch.utils.data import IterableDataset, get_worker_info
 from torchvision import transforms
 
 
+class TensorDict(dict):
+    def to(self, device: torch.device):
+        for k, v in self.items():
+            if hasattr(v, "to"):
+                self[k] = v.to(device)
+        return self
+
+
 class StreamDataset(IterableDataset):
     def __init__(
         self,
@@ -31,7 +39,7 @@ class StreamDataset(IterableDataset):
         return self._len
 
     def _pick(self, sample: dict):
-        data = {}
+        data = TensorDict()
         data["x_t"] = self.trans(sample["image_front"])
         data["a_t"] = torch.tensor(
             [sample["throttle"], sample["steer"], sample["brake"]]
