@@ -100,7 +100,7 @@ def main(config: TrainingConfig) -> None:
             loss.backward()
             clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
             optimizer.step()
-            scheduler.step(epoch + i / total)
+            scheduler.step()
             cum_loss += loss.item()
             avg_loss += loss.item()
             pbar.set_postfix(loss=cum_loss / i)
