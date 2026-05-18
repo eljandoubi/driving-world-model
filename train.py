@@ -82,9 +82,10 @@ def main(config: TrainingConfig) -> None:
         enumerate(dataloaders["train"], start=1), desc="training one epoch", total=total
     )
 
-    cum_loss = 0.0
     model.train()
     for epoch in tqdm(range(start_epoch, config.epochs), desc="training epochs"):
+        cum_loss = 0.0
+        avg_loss = 0.0
         for i, batch in pbar:
             if i < start_iteration:
                 continue  # skip already trained iterations when resuming
@@ -98,18 +99,20 @@ def main(config: TrainingConfig) -> None:
             optimizer.step()
             scheduler.step(epoch + i / total)
             cum_loss += loss.item()
+            avg_loss += loss.item()
             pbar.set_postfix(loss=cum_loss / i)
             if step % config.log_every == 0:
-                avg_loss = cum_loss / i
-                cum_loss = 0.0  # reset cumulative loss after logging
+                avg_loss /= config.log_every
                 pbar.set_postfix(avg_loss=avg_loss)
                 wandb.log(
                     {
                         "train/avg_loss": avg_loss,
+                        "train/cum_loss": cum_loss / i,
                         "train/lr": scheduler.get_last_lr()[0],
                     },
                     step=step,
                 )
+                avg_loss = 0.0
             if step % config.checkpoint_every == 0:
                 gc.collect()  # collect garbage before validation to free up memory
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
