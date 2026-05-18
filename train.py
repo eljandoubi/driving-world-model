@@ -1,3 +1,5 @@
+import gc
+
 import torch
 import wandb
 from dotenv import load_dotenv
@@ -62,12 +64,13 @@ def main(config: TrainingConfig) -> None:
 
     if config.resume:
         print(f"Resuming from checkpoint {config.resume}...")
-        start_epoch, start_iteration = load_checkpoint(
+        start_epoch, start_iteration, best_val_loss = load_checkpoint(
             config.resume, model, optimizer, None, device, early_stopping
         )
         print(f"Resumed from epoch {start_epoch}, iteration {start_iteration}")
     else:
         start_epoch = 0
+        best_val_loss = float("inf")
         start_iteration = 0
 
     total = int(ceil(len(dataloaders["train"])) / float(config.batch_size))
@@ -76,11 +79,12 @@ def main(config: TrainingConfig) -> None:
     )
 
     cum_loss = 0.0
+    model.train()
     for epoch in tqdm(range(start_epoch, config.epochs), desc="training epochs"):
         for i, batch in pbar:
             if i < start_iteration:
                 continue  # skip already trained iterations when resuming
-            model.train()
+            step = epoch * total + i
             optimizer.zero_grad(set_to_none=True)
             batch = batch.to(device, non_blocking=True)
             x_tp1_pred = model(batch["a_t"], batch["x_t"])
@@ -94,24 +98,37 @@ def main(config: TrainingConfig) -> None:
                 avg_loss = cum_loss / i
                 cum_loss = 0.0  # reset cumulative loss after logging
                 pbar.set_postfix(avg_loss=avg_loss)
-                wandb.log({"train/loss": avg_loss}, step=i)
+                wandb.log({"train/avg_loss": avg_loss}, step=step)
             if i % config.checkpoint_every == 0:
+                gc.collect()  # collect garbage before validation to free up memory
+                torch.cuda.empty_cache()  # clear CUDA cache before validation
                 val_loss = validate_model(
                     model, dataloaders["validation"], device, config.batch_size * 4
                 )
+                model.train()  # set back to train mode after validation
                 pbar.set_postfix(val_loss=val_loss)
-                wandb.log({"validation/loss": val_loss}, step=i)
+                wandb.log({"validation/loss": val_loss}, step=step)
                 save_checkpoint(
-                    config.checkpoint_dir / f"checkpoint_step_{i}.pt",
+                    config.checkpoint_dir / f"checkpoint_step_{step}.pt",
                     model,
                     optimizer,
                     None,
                     early_stopping,
                     epoch=i,
                 )
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    save_checkpoint(
+                        config.checkpoint_dir / "best_checkpoint.pt",
+                        model,
+                        optimizer,
+                        None,
+                        early_stopping,
+                        epoch=i,
+                    )
                 if early_stopping.step(val_loss):
                     print(
-                        f"Early stopping at step {i} with validation loss {val_loss:.4f}"
+                        f"Early stopping at step {step} with validation loss {val_loss:.4f}"
                     )
                     break
 

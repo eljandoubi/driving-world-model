@@ -7,7 +7,7 @@ from typing import Literal
 class TrainingConfig:
     """world model training configuration."""
 
-    num_tokens: int = 4
+    num_tokens: int = 8
     base_name: str = "runwayml/stable-diffusion-v1-5"
     hidden_dim: int = 1024
     activation: Literal[
@@ -21,15 +21,15 @@ class TrainingConfig:
     persistent_workers: bool = True
     pin_memory: bool = True
     learning_rate: float = 1e-4
-    image_size: int = 64
-    num_workers: int = 4
+    image_size: int = 256
+    num_workers: int = 8
     epochs: int = 100000
     max_grad_norm: float = 1.0
-    batch_size: int = 4
+    batch_size: int = 8
     dropout: float = 0.1
     log_every: int = 1000
-    checkpoint_every: int = 1000
-    patience: int = 5
+    checkpoint_every: int = 10000
+    patience: int = 10
     min_delta: float = 1e-8
     runs_dir: str | Path = "runs"
     checkpoint_dir: Path = Path("checkpoints")
