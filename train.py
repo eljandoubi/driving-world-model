@@ -58,10 +58,11 @@ def main(config: TrainingConfig) -> None:
     optimizer = AdamW(model.parameters(), lr=config.learning_rate)
 
     total = int(ceil(len(dataloaders["train"])) / float(config.batch_size))
-    pbar = tqdm(enumerate(dataloaders["train"], start=1), desc="training epoch", total=total)
+    pbar = tqdm(
+        enumerate(dataloaders["train"], start=1), desc="training epoch", total=total
+    )
     cum_loss = 0.0
     for i, batch in pbar:
-        
         model.train()
         optimizer.zero_grad(set_to_none=True)
         batch = batch.to(device)
