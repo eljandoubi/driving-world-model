@@ -17,7 +17,7 @@ def validate_model(
     pbar = tqdm(enumerate(dataloader, start=1), desc="validate", total=total)
 
     for i, batch in pbar:
-        batch = batch.to(device)
+        batch = batch.to(device, non_blocking=True)
         x_tp1_pred = model(batch["a_t"], batch["x_t"])
         loss = mse_loss(x_tp1_pred, batch["x_tp1"])
         cum_loss += loss.item()

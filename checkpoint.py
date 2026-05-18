@@ -14,11 +14,13 @@ def save_checkpoint(
     scheduler: torch.optim.lr_scheduler.LRScheduler | None,
     early_stopping: EarlyStopping,
     epoch: int,
+    iteration: int,
 ) -> None:
     """Save training checkpoint."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     data = {
         "epoch": epoch,
+        "iteration": iteration,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict()
@@ -36,11 +38,11 @@ def load_checkpoint(
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     device: torch.device,
     early_stopping: EarlyStopping,
-) -> int:
-    """Load training checkpoint. Returns start_epoch."""
+) -> tuple[int, int]:
+    """Load training checkpoint. Returns start_epoch and start_iteration."""
     ckpt = torch.load(path, map_location=device, weights_only=True)
     model.load_state_dict(ckpt["model_state_dict"])
     optimizer.load_state_dict(ckpt["optimizer_state_dict"])
     scheduler.load_state_dict(ckpt["scheduler_state_dict"])
     early_stopping.load_state_dict(ckpt["early_stopping_state_dict"])
-    return ckpt["epoch"]
+    return ckpt["epoch"], ckpt["iteration"]

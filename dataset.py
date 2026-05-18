@@ -7,10 +7,10 @@ from torchvision import transforms
 
 
 class TensorDict(dict):
-    def to(self, device: torch.device):
+    def to(self, device: torch.device, non_blocking: bool = False):
         for k, v in self.items():
             if hasattr(v, "to"):
-                self[k] = v.to(device)
+                self[k] = v.to(device, non_blocking=non_blocking)
         return self
 
 

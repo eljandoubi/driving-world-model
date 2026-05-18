@@ -7,8 +7,10 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import HfArgumentParser
 
+from checkpoint import load_checkpoint, save_checkpoint
 from config import TrainingConfig
 from dataset import StreamDataset, ceil
+from early_stopping import EarlyStopping
 from model import WorldModel
 from validate import tqdm, validate_model
 
@@ -56,25 +58,66 @@ def main(config: TrainingConfig) -> None:
     ).to(device)
 
     optimizer = AdamW(model.parameters(), lr=config.learning_rate)
+    early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
+
+    if config.resume:
+        print(f"Resuming from checkpoint {config.resume}...")
+        start_epoch, start_iteration = load_checkpoint(
+            config.resume, model, optimizer, None, device, early_stopping
+        )
+        print(f"Resumed from epoch {start_epoch}, iteration {start_iteration}")
+    else:
+        start_epoch = 0
+        start_iteration = 0
 
     total = int(ceil(len(dataloaders["train"])) / float(config.batch_size))
     pbar = tqdm(
-        enumerate(dataloaders["train"], start=1), desc="training epoch", total=total
+        enumerate(dataloaders["train"], start=1), desc="training one epoch", total=total
     )
-    cum_loss = 0.0
-    for i, batch in pbar:
-        model.train()
-        optimizer.zero_grad(set_to_none=True)
-        batch = batch.to(device)
-        x_tp1_pred = model(batch["a_t"], batch["x_t"])
-        loss = mse_loss(x_tp1_pred, batch["x_tp1"])
-        loss.backward()
-        clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
-        optimizer.step()
-        cum_loss += loss.item()
-        pbar.set_postfix(loss=cum_loss / i)
 
-    test_loss = validate_model(model, dataloaders["test"], device, config.batch_size)
+    cum_loss = 0.0
+    for epoch in tqdm(range(start_epoch, config.epochs), desc="training epochs"):
+        for i, batch in pbar:
+            if i < start_iteration:
+                continue  # skip already trained iterations when resuming
+            model.train()
+            optimizer.zero_grad(set_to_none=True)
+            batch = batch.to(device, non_blocking=True)
+            x_tp1_pred = model(batch["a_t"], batch["x_t"])
+            loss = mse_loss(x_tp1_pred, batch["x_tp1"])
+            loss.backward()
+            clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
+            optimizer.step()
+            cum_loss += loss.item()
+            pbar.set_postfix(loss=cum_loss / i)
+            if i % config.log_every == 0:
+                avg_loss = cum_loss / i
+                cum_loss = 0.0  # reset cumulative loss after logging
+                pbar.set_postfix(avg_loss=avg_loss)
+                wandb.log({"train/loss": avg_loss}, step=i)
+            if i % config.checkpoint_every == 0:
+                val_loss = validate_model(
+                    model, dataloaders["validation"], device, config.batch_size * 4
+                )
+                pbar.set_postfix(val_loss=val_loss)
+                wandb.log({"validation/loss": val_loss}, step=i)
+                save_checkpoint(
+                    config.checkpoint_dir / f"checkpoint_step_{i}.pt",
+                    model,
+                    optimizer,
+                    None,
+                    early_stopping,
+                    epoch=i,
+                )
+                if early_stopping.step(val_loss):
+                    print(
+                        f"Early stopping at step {i} with validation loss {val_loss:.4f}"
+                    )
+                    break
+
+        test_loss = validate_model(
+            model, dataloaders["test"], device, config.batch_size * 4
+        )
 
     print("final test loss", test_loss)
     wandb.log({"test/loss": test_loss})
