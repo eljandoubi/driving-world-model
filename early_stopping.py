@@ -24,3 +24,23 @@ class EarlyStopping:
         self.counter = 0
         if not only_counter:
             self.best_loss = None
+
+    def load_state_dict(self, state_dict) -> None:
+        """Load the early stopping state."""
+        assert state_dict["patience"] == self.patience, (
+            "patience in state_dict does not match"
+        )
+        assert state_dict["min_delta"] == self.min_delta, (
+            "min_delta in state_dict does not match"
+        )
+        self.counter = state_dict["counter"]
+        self.best_loss = state_dict["best_loss"]
+
+    def state_dict(self) -> dict:
+        """Return the early stopping state."""
+        return {
+            "counter": self.counter,
+            "best_loss": self.best_loss,
+            "patience": self.patience,
+            "min_delta": self.min_delta,
+        }
