@@ -99,7 +99,7 @@ def main(config: TrainingConfig) -> None:
             scheduler.step(epoch + i / total)
             cum_loss += loss.item()
             pbar.set_postfix(loss=cum_loss / i)
-            if i % config.log_every == 0:
+            if step % config.log_every == 0:
                 avg_loss = cum_loss / i
                 cum_loss = 0.0  # reset cumulative loss after logging
                 pbar.set_postfix(avg_loss=avg_loss)
@@ -110,7 +110,7 @@ def main(config: TrainingConfig) -> None:
                     },
                     step=step,
                 )
-            if i % config.checkpoint_every == 0:
+            if step % config.checkpoint_every == 0:
                 gc.collect()  # collect garbage before validation to free up memory
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
                 val_loss = validate_model(
@@ -147,8 +147,20 @@ def main(config: TrainingConfig) -> None:
                     )
                     break
 
+        gc.collect()  # collect garbage before validation to free up memory
+        torch.cuda.empty_cache()  # clear CUDA cache before validation
         test_loss = validate_model(
             model, dataloaders["test"], device, config.batch_size * 4
+        )
+        save_checkpoint(
+            config.checkpoint_dir / "final_checkpoint.pt",
+            model,
+            optimizer,
+            scheduler,
+            early_stopping,
+            epoch=epoch,
+            iteration=i,
+            best_val_loss=best_val_loss,
         )
 
     print("final test loss", test_loss)
