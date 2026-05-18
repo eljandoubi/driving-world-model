@@ -78,16 +78,19 @@ def main(config: TrainingConfig) -> None:
         start_iteration = 0
 
     total = int(ceil(len(dataloaders["train"])) / float(config.batch_size))
-    pbar = tqdm(
-        enumerate(dataloaders["train"], start=1), desc="training one epoch", total=total
-    )
 
     model.train()
+    stopped = False
     for epoch in tqdm(range(start_epoch, config.epochs), desc="training epochs"):
         cum_loss = 0.0
         avg_loss = 0.0
+        pbar = tqdm(
+            enumerate(dataloaders["train"], start=1),
+            desc=f"epoch {epoch}",
+            total=total,
+        )
         for i, batch in pbar:
-            if i < start_iteration:
+            if epoch == start_epoch and i < start_iteration:
                 continue  # skip already trained iterations when resuming
             step = epoch * total + i
             optimizer.zero_grad(set_to_none=True)
@@ -148,7 +151,11 @@ def main(config: TrainingConfig) -> None:
                     print(
                         f"Early stopping at step {step} with validation loss {val_loss:.4f}"
                     )
+                    stopped = True
                     break
+
+        if stopped:
+            break
 
         gc.collect()  # collect garbage before validation to free up memory
         torch.cuda.empty_cache()  # clear CUDA cache before validation
