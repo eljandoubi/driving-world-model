@@ -31,6 +31,8 @@ class TrainingConfig:
     checkpoint_every: int = 10000
     patience: int = 10
     min_delta: float = 1e-8
+    scheduler_t0: int = 10
+    scheduler_t_mult: int = 2
     runs_dir: str | Path = "runs"
     checkpoint_dir: Path = Path("checkpoints")
     plot_dir: Path = Path("plots")

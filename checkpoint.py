@@ -37,7 +37,7 @@ def load_checkpoint(
     path: str | Path,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None,
     device: torch.device,
     early_stopping: EarlyStopping,
 ) -> tuple[int, int, float]:
@@ -45,7 +45,8 @@ def load_checkpoint(
     ckpt = torch.load(path, map_location=device, weights_only=True)
     model.load_state_dict(ckpt["model_state_dict"])
     optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-    scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+    if scheduler is not None and ckpt["scheduler_state_dict"] is not None:
+        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
     early_stopping.load_state_dict(ckpt["early_stopping_state_dict"])
     return (
         ckpt["epoch"],

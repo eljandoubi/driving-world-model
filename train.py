@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from torch.nn.functional import mse_loss
 from torch.nn.utils import clip_grad_norm_
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader
 from transformers import HfArgumentParser
 
@@ -60,12 +61,15 @@ def main(config: TrainingConfig) -> None:
     ).to(device)
 
     optimizer = AdamW(model.parameters(), lr=config.learning_rate)
+    scheduler = CosineAnnealingWarmRestarts(
+        optimizer, T_0=config.scheduler_t0, T_mult=config.scheduler_t_mult
+    )
     early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
 
     if config.resume:
         print(f"Resuming from checkpoint {config.resume}...")
         start_epoch, start_iteration, best_val_loss = load_checkpoint(
-            config.resume, model, optimizer, None, device, early_stopping
+            config.resume, model, optimizer, scheduler, device, early_stopping
         )
         print(f"Resumed from epoch {start_epoch}, iteration {start_iteration}")
     else:
@@ -92,13 +96,20 @@ def main(config: TrainingConfig) -> None:
             loss.backward()
             clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
             optimizer.step()
+            scheduler.step(epoch + i / total)
             cum_loss += loss.item()
             pbar.set_postfix(loss=cum_loss / i)
             if i % config.log_every == 0:
                 avg_loss = cum_loss / i
                 cum_loss = 0.0  # reset cumulative loss after logging
                 pbar.set_postfix(avg_loss=avg_loss)
-                wandb.log({"train/avg_loss": avg_loss}, step=step)
+                wandb.log(
+                    {
+                        "train/avg_loss": avg_loss,
+                        "train/lr": scheduler.get_last_lr()[0],
+                    },
+                    step=step,
+                )
             if i % config.checkpoint_every == 0:
                 gc.collect()  # collect garbage before validation to free up memory
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
@@ -112,9 +123,11 @@ def main(config: TrainingConfig) -> None:
                     config.checkpoint_dir / f"checkpoint_step_{step}.pt",
                     model,
                     optimizer,
-                    None,
+                    scheduler,
                     early_stopping,
-                    epoch=i,
+                    epoch=epoch,
+                    iteration=i,
+                    best_val_loss=best_val_loss,
                 )
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -122,9 +135,11 @@ def main(config: TrainingConfig) -> None:
                         config.checkpoint_dir / "best_checkpoint.pt",
                         model,
                         optimizer,
-                        None,
+                        scheduler,
                         early_stopping,
-                        epoch=i,
+                        epoch=epoch,
+                        iteration=i,
+                        best_val_loss=best_val_loss,
                     )
                 if early_stopping.step(val_loss):
                     print(
