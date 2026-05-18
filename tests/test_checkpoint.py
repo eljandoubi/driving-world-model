@@ -82,7 +82,9 @@ def test_checkpoint_preserves_model_weights():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir) / "ckpt.pt"
-        save_checkpoint(path, model, optimizer, None, es, epoch=0, iteration=0, best_val_loss=1.0)
+        save_checkpoint(
+            path, model, optimizer, None, es, epoch=0, iteration=0, best_val_loss=1.0
+        )
 
         model2 = _make_model()
         optimizer2 = AdamW(model2.parameters(), lr=1e-3)
@@ -99,5 +101,7 @@ def test_checkpoint_creates_parent_dirs():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir) / "nested" / "deep" / "ckpt.pt"
-        save_checkpoint(path, model, optimizer, None, es, epoch=0, iteration=0, best_val_loss=0.0)
+        save_checkpoint(
+            path, model, optimizer, None, es, epoch=0, iteration=0, best_val_loss=0.0
+        )
         assert path.exists()

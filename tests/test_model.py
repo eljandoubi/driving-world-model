@@ -22,7 +22,9 @@ def test_action_embedder_different_tokens():
 
 @pytest.mark.parametrize("num_tokens", [1, 4, 16])
 def test_action_embedder_various_tokens(num_tokens):
-    embed = ActionEmbedder(action_dim=3, embed_dim=64, num_tokens=num_tokens, hidden_dim=128)
+    embed = ActionEmbedder(
+        action_dim=3, embed_dim=64, num_tokens=num_tokens, hidden_dim=128
+    )
     out = embed(torch.randn(4, 3))
     assert out.shape == (4, num_tokens, 64)
 
