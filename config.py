@@ -42,9 +42,6 @@ class TrainingConfig:
     def __post_init__(self) -> None:
         assert self.num_tokens > 0, "num_tokens must be > 0"
         assert self.hidden_dim > 0, "hidden_dim must be > 0"
-        assert self.num_workers >= self.batch_size, (
-            "num_worker must be greater or equal to batch_size"
-        )
         assert self.activation in (
             "gelu",
             "gelu-approximate",
