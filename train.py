@@ -27,7 +27,7 @@ def main(config: TrainingConfig) -> None:
         config=vars(config),
         id=config.run_id,
         resume="allow" if config.run_id else None,
-        mode="disabled",  # for debug
+        # mode="disabled",  # for debug
     )
     config.set_id(run.id)
     config.update_paths()
