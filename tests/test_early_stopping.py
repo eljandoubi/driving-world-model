@@ -1,5 +1,7 @@
 """Tests for early stopping."""
 
+import pytest
+
 from early_stopping import EarlyStopping
 
 
@@ -35,6 +37,15 @@ def test_reset():
     assert es.best_loss == 1.0
 
 
+def test_reset_full():
+    es = EarlyStopping(patience=2)
+    es.step(1.0)
+    es.step(1.5)
+    es.reset(only_counter=False)
+    assert es.counter == 0
+    assert es.best_loss is None
+
+
 def test_state_dict_roundtrip():
     es = EarlyStopping(patience=5, min_delta=0.01)
     es.step(0.5)
@@ -45,3 +56,28 @@ def test_state_dict_roundtrip():
     es2.load_state_dict(state)
     assert es2.counter == es.counter
     assert es2.best_loss == es.best_loss
+
+
+def test_load_state_dict_patience_mismatch():
+    es = EarlyStopping(patience=5, min_delta=0.01)
+    es.step(0.5)
+    state = es.state_dict()
+
+    es2 = EarlyStopping(patience=3, min_delta=0.01)
+    with pytest.raises(AssertionError):
+        es2.load_state_dict(state)
+
+
+def test_first_step_never_stops():
+    es = EarlyStopping(patience=1, min_delta=0.0)
+    # First step should always set best and not stop
+    assert not es.step(999.0)
+
+
+@pytest.mark.parametrize("patience", [1, 5, 10])
+def test_exact_patience_boundary(patience):
+    es = EarlyStopping(patience=patience, min_delta=0.0)
+    es.step(0.5)  # set best
+    for _ in range(patience - 1):
+        assert not es.step(1.0)
+    assert es.step(1.0)  # exactly at patience

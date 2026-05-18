@@ -70,3 +70,34 @@ def test_save_load_no_scheduler():
         )
         assert epoch == 1
         assert iteration == 50
+
+
+def test_checkpoint_preserves_model_weights():
+    model = _make_model()
+    # Set specific weights
+    with torch.no_grad():
+        model.weight.fill_(42.0)
+    optimizer = AdamW(model.parameters(), lr=1e-3)
+    es = EarlyStopping(patience=5, min_delta=0.0)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "ckpt.pt"
+        save_checkpoint(path, model, optimizer, None, es, epoch=0, iteration=0, best_val_loss=1.0)
+
+        model2 = _make_model()
+        optimizer2 = AdamW(model2.parameters(), lr=1e-3)
+        es2 = EarlyStopping(patience=5, min_delta=0.0)
+        load_checkpoint(path, model2, optimizer2, None, torch.device("cpu"), es2)
+
+        assert torch.allclose(model2.weight, torch.full_like(model2.weight, 42.0))
+
+
+def test_checkpoint_creates_parent_dirs():
+    model = _make_model()
+    optimizer = AdamW(model.parameters(), lr=1e-3)
+    es = EarlyStopping(patience=5, min_delta=0.0)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "nested" / "deep" / "ckpt.pt"
+        save_checkpoint(path, model, optimizer, None, es, epoch=0, iteration=0, best_val_loss=0.0)
+        assert path.exists()
