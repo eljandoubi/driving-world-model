@@ -29,6 +29,8 @@ class TrainingConfig:
     dropout: float = 0.1
     log_every: int = 1000
     checkpoint_every: int = 1000
+    patience: int = 5
+    min_delta: float = 1e-8
     runs_dir: str | Path = "runs"
     checkpoint_dir: Path = Path("checkpoints")
     plot_dir: Path = Path("plots")
@@ -60,6 +62,9 @@ class TrainingConfig:
         assert self.max_grad_norm > 0, "max_grad_norm must be > 0"
         assert self.batch_size > 0, "batch_size must be > 0"
         assert self.log_every > 0, "log_every must be > 0"
+        assert self.image_size > 0, "image_size must be > 0"
+        assert self.patience > 0, "patience must be > 0"
+        assert self.min_delta >= 0, "min_delta must be >= 0"
         assert self.checkpoint_every > 0, "checkpoint_every must be > 0"
         assert self.dropout >= 0 and self.dropout < 1, "dropout must be in [0,1)"
         if self.resume:
