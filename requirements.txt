@@ -1,8 +1,0 @@
-accelerate>=1.13.0
-datasets>=4.8.5
-diffusers>=0.37.1
-pillow>=12.2.0
-python-dotenv>=1.2.2
-transformers>=5.8.1
-wandb>=0.27.0
-matplotlib>=3.10.9
