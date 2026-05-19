@@ -10,8 +10,6 @@ dependencies = [
     "diffusers>=0.37.1",
     "pillow>=12.2.0",
     "python-dotenv>=1.2.2",
-    "torch>=2.12.0",
-    "torchvision>=0.27.0",
     "transformers>=5.8.1",
     "wandb>=0.27.0",
 ]
