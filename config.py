@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from os import getenv
 from pathlib import Path
 from typing import Literal
 
@@ -43,6 +44,7 @@ class TrainingConfig:
     run_id: str | None = None  # Optional run ID for logging (overrides auto-generated)
 
     def __post_init__(self) -> None:
+        self.node_rank = int(getenv("RANK", self.node_rank))
         assert self.n_gpus > 0, "n_gpus must be > 0"
         assert self.n_nodes > 0, "n_nodes must be > 0"
         assert self.node_rank >= 0 and self.node_rank < self.n_nodes, (
