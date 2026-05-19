@@ -15,6 +15,7 @@ from config import TrainingConfig
 from dataset import StreamDataset, ceil
 from early_stopping import EarlyStopping
 from model import WorldModel
+from plot import plot_video
 from validate import tqdm, validate_model
 
 print("Loading environment variables...", load_dotenv())
@@ -122,11 +123,11 @@ def main(config: TrainingConfig) -> None:
                 val_loss = validate_model(
                     model, dataloaders["validation"], device, config.batch_size * 4
                 )
-                model.train()  # set back to train mode after validation
                 pbar.set_postfix(val_loss=val_loss)
                 wandb.log({"validation/loss": val_loss}, step=step)
+                ckpt_path = config.checkpoint_dir / f"checkpoint_step_{step}.pt"
                 save_checkpoint(
-                    config.checkpoint_dir / f"checkpoint_step_{step}.pt",
+                    ckpt_path,
                     model,
                     optimizer,
                     scheduler,
@@ -135,10 +136,23 @@ def main(config: TrainingConfig) -> None:
                     iteration=i,
                     best_val_loss=best_val_loss,
                 )
+                wandb.save(str(ckpt_path), base_path=str(config.run_dir))
+                video_path = plot_video(
+                    model,
+                    StreamDataset(split="validation", im_s=config.image_size),
+                    save_path=config.plot_dir / f"driving_video_step_{step}.mp4",
+                    device=device,
+                )
+                wandb.log(
+                    {"video/prediction": wandb.Video(str(video_path), fps=10)},
+                    step=step,
+                )
+                model.train()  # set back to train mode after validation
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
+                    best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
                     save_checkpoint(
-                        config.checkpoint_dir / "best_checkpoint.pt",
+                        best_ckpt_path,
                         model,
                         optimizer,
                         scheduler,
@@ -147,6 +161,22 @@ def main(config: TrainingConfig) -> None:
                         iteration=i,
                         best_val_loss=best_val_loss,
                     )
+                    wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
+                    best_video_path = plot_video(
+                        model,
+                        StreamDataset(split="test", im_s=config.image_size),
+                        save_path=config.plot_dir / "best_driving_video.mp4",
+                        device=device,
+                    )
+                    wandb.log(
+                        {
+                            "video/best_prediction": wandb.Video(
+                                str(best_video_path), fps=10
+                            )
+                        },
+                        step=step,
+                    )
+
                 if early_stopping.step(val_loss):
                     print(
                         f"Early stopping at step {step} with validation loss {val_loss:.4f}"
@@ -162,8 +192,9 @@ def main(config: TrainingConfig) -> None:
         test_loss = validate_model(
             model, dataloaders["test"], device, config.batch_size * 4
         )
+        final_ckpt_path = config.checkpoint_dir / "final_checkpoint.pt"
         save_checkpoint(
-            config.checkpoint_dir / "final_checkpoint.pt",
+            final_ckpt_path,
             model,
             optimizer,
             scheduler,
@@ -171,6 +202,16 @@ def main(config: TrainingConfig) -> None:
             epoch=epoch,
             iteration=i,
             best_val_loss=best_val_loss,
+        )
+        wandb.save(str(final_ckpt_path), base_path=str(config.run_dir))
+        final_video_path = plot_video(
+            model,
+            StreamDataset(split="test", im_s=config.image_size),
+            save_path=config.plot_dir / "final_driving_video.mp4",
+            device=device,
+        )
+        wandb.log(
+            {"video/final_prediction": wandb.Video(str(final_video_path), fps=10)},
         )
 
     print("final test loss", test_loss)

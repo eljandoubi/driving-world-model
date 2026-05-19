@@ -8,6 +8,7 @@ dependencies = [
     "accelerate>=1.13.0",
     "datasets>=4.8.5",
     "diffusers>=0.37.1",
+    "matplotlib>=3.10.9",
     "pillow>=12.2.0",
     "python-dotenv>=1.2.2",
     "torch>=2.12.0",
