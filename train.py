@@ -290,7 +290,6 @@ if __name__ == "__main__":
         config.n_gpus = int(os.environ.get("LOCAL_WORLD_SIZE", config.n_gpus))  # pyright: ignore[reportArgumentType]
         total_world_size = int(os.environ["WORLD_SIZE"])
         config.n_nodes = total_world_size // config.n_gpus
-        config.node_rank = int(os.environ["RANK"]) // config.n_gpus
         main(local_rank, config)
     elif config.n_gpus * config.n_nodes > 1:
         mp.spawn(main, args=(config,), nprocs=config.n_gpus, join=True)  # pyright: ignore[reportPrivateImportUsage, reportAttributeAccessIssue]

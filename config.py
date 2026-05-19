@@ -44,7 +44,8 @@ class TrainingConfig:
     run_id: str | None = None  # Optional run ID for logging (overrides auto-generated)
 
     def __post_init__(self) -> None:
-        self.node_rank = int(getenv("RANK", self.node_rank))
+        if getenv("RANK") is not None:
+            self.node_rank = int(getenv("RANK")) // self.n_gpus  # pyright: ignore[reportArgumentType]
         assert self.n_gpus > 0, "n_gpus must be > 0"
         assert self.n_nodes > 0, "n_nodes must be > 0"
         assert self.node_rank >= 0 and self.node_rank < self.n_nodes, (
