@@ -22,10 +22,10 @@ class TrainingConfig:
     pin_memory: bool = True
     learning_rate: float = 1e-4
     image_size: int = 256
-    num_workers: int = 8
+    num_workers: int = 4
     epochs: int = 100000
     max_grad_norm: float = 1.0
-    batch_size: int = 8
+    batch_size: int = 2
     dropout: float = 0.1
     log_every: int = 1000
     checkpoint_every: int = 10000
@@ -33,6 +33,9 @@ class TrainingConfig:
     min_delta: float = 1e-8
     scheduler_t0: int = 10
     scheduler_t_mult: int = 2
+    n_gpus: int = 1
+    n_nodes: int = 1
+    node_rank: int = 0
     runs_dir: str | Path = "runs"
     checkpoint_dir: Path = Path("checkpoints")
     plot_dir: Path = Path("plots")
@@ -40,6 +43,11 @@ class TrainingConfig:
     run_id: str | None = None  # Optional run ID for logging (overrides auto-generated)
 
     def __post_init__(self) -> None:
+        assert self.n_gpus > 0, "n_gpus must be > 0"
+        assert self.n_nodes > 0, "n_nodes must be > 0"
+        assert self.node_rank >= 0 and self.node_rank < self.n_nodes, (
+            f"node_rank must be in [0, n_nodes); got {self.node_rank}"
+        )
         assert self.num_tokens > 0, "num_tokens must be > 0"
         assert self.hidden_dim > 0, "hidden_dim must be > 0"
         assert self.activation in (

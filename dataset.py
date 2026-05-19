@@ -22,8 +22,12 @@ class StreamDataset(IterableDataset):
         im_s=256,
         mean=(0.4738, 0.4824, 0.4592, 1.0000),
         std=(0.2823, 0.2809, 0.2801, 1e-8),
+        rank: int = 0,
+        world_size: int = 1,
     ) -> None:
         super().__init__()
+        self.rank = rank
+        self.world_size = world_size
         self.main_stream = load_dataset(name, split=split, streaming=True)
         self._len = self.main_stream.info.splits[split].num_examples  # pyright: ignore[reportOptionalSubscript]
 
@@ -50,16 +54,31 @@ class StreamDataset(IterableDataset):
         return data, meta
 
     def __iter__(self):
+        total = len(self)
+
+        if self.world_size > 1:
+            per_rank = total // self.world_size
+            rank_start = self.rank * per_rank
+            rank_size = per_rank
+        else:
+            rank_start = 0
+            rank_size = total
+
         worker_info = get_worker_info()
-        if worker_info is None:  # single-process data loading, return the full iterator
-            itb = self.main_stream
-        else:  # in a worker process
-            # split workload
-            per_worker = int(ceil(len(self) / float(worker_info.num_workers)))
+        if worker_info is not None:
+            per_worker = int(ceil(rank_size / float(worker_info.num_workers)))
             worker_id = worker_info.id
-            iter_start = worker_id * per_worker
-            chunk = min(per_worker, len(self) - iter_start)
-            itb = self.main_stream.skip(iter_start).take(chunk)
+            worker_start = worker_id * per_worker
+            start = rank_start + worker_start
+            chunk = min(per_worker, rank_size - worker_start)
+        else:
+            start = rank_start
+            chunk = rank_size
+
+        itb = self.main_stream
+        if start > 0:
+            itb = itb.skip(start)
+        itb = itb.take(chunk)
 
         run_id = ""
         for it in itb:

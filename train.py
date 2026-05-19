@@ -1,9 +1,13 @@
 import gc
+import os
 
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 import wandb
 from dotenv import load_dotenv
 from torch.nn.functional import mse_loss
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.utils import clip_grad_norm_
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
@@ -21,45 +25,78 @@ from validate import tqdm, validate_model
 print("Loading environment variables...", load_dotenv())
 
 
-def main(config: TrainingConfig) -> None:
-    # --- WANDB INIT ---
-    run = wandb.init(
-        project="driving-world-model",
-        config=vars(config),
-        id=config.run_id,
-        resume="allow" if config.run_id else None,
-        # mode="disabled",  # for debug
-    )
-    config.set_id(run.id)
-    config.update_paths()
+def setup_ddp(local_rank: int, global_rank: int, world_size: int) -> None:
+    os.environ.setdefault("MASTER_ADDR", "localhost")
+    os.environ.setdefault("MASTER_PORT", "12355")
+    dist.init_process_group("nccl", rank=global_rank, world_size=world_size)
+    torch.cuda.set_device(local_rank)
 
-    # Update wandb config with run paths
-    wandb.config.update(
-        {
-            "run_dir": str(config.run_dir),
-            "run_id": run.id,
-            "checkpoint_dir": str(config.checkpoint_dir),
-            "plot_dir": str(config.plot_dir),
-        },
-        allow_val_change=True,
-    )
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("current device", device)
+
+def cleanup_ddp() -> None:
+    dist.destroy_process_group()
+
+
+def main(local_rank: int, config: TrainingConfig) -> None:
+    world_size = config.n_gpus * config.n_nodes
+    global_rank = config.node_rank * config.n_gpus + local_rank
+    is_main = global_rank == 0
+
+    if world_size > 1:
+        setup_ddp(local_rank, global_rank, world_size)
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    print(f"[Rank {global_rank}] using device {device}")
+
+    # --- WANDB INIT (rank 0 only) ---
+    if is_main:
+        run = wandb.init(
+            project="driving-world-model",
+            config=vars(config),
+            id=config.run_id,
+            resume="allow" if config.run_id else None,
+            # mode="disabled",  # for debug
+        )
+        config.set_id(run.id)
+        config.update_paths()
+
+        wandb.config.update(
+            {
+                "run_dir": str(config.run_dir),
+                "run_id": run.id,
+                "checkpoint_dir": str(config.checkpoint_dir),
+                "plot_dir": str(config.plot_dir),
+            },
+            allow_val_change=True,
+        )
+
     dataloaders = {}
     for k in ["train", "validation", "test"]:
         dataloaders[k] = DataLoader(
-            StreamDataset(split=k, im_s=config.image_size),
+            StreamDataset(
+                split=k,
+                im_s=config.image_size,
+                rank=global_rank,
+                world_size=world_size,
+            ),
             batch_size=config.batch_size,
             num_workers=config.num_workers,
             persistent_workers=config.persistent_workers,
             pin_memory=config.pin_memory,
+            drop_last=(world_size > 1),
         )
 
-    model = WorldModel(
+    raw_model = WorldModel(
         base_name=config.base_name,
         num_tokens=config.num_tokens,
         hidden_dim=config.hidden_dim,
     ).to(device)
+
+    if world_size > 1:
+        model = DDP(raw_model, device_ids=[local_rank])
+    else:
+        model = raw_model
 
     optimizer = AdamW(model.parameters(), lr=config.learning_rate)
     scheduler = CosineAnnealingWarmRestarts(
@@ -68,27 +105,33 @@ def main(config: TrainingConfig) -> None:
     early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
 
     if config.resume:
-        print(f"Resuming from checkpoint {config.resume}...")
+        if is_main:
+            print(f"Resuming from checkpoint {config.resume}...")
         start_epoch, start_iteration, best_val_loss = load_checkpoint(
-            config.resume, model, optimizer, scheduler, device, early_stopping
+            config.resume, raw_model, optimizer, scheduler, device, early_stopping
         )
-        print(f"Resumed from epoch {start_epoch}, iteration {start_iteration}")
+        if is_main:
+            print(f"Resumed from epoch {start_epoch}, iteration {start_iteration}")
     else:
         start_epoch = 0
         best_val_loss = float("inf")
         start_iteration = 0
 
     total = int(ceil(len(dataloaders["train"])) / float(config.batch_size))
+    disable_tqdm = not is_main
 
     model.train()
     stopped = False
-    for epoch in tqdm(range(start_epoch, config.epochs), desc="training epochs"):
+    for epoch in tqdm(
+        range(start_epoch, config.epochs), desc="training epochs", disable=disable_tqdm
+    ):
         cum_loss = 0.0
         avg_loss = 0.0
         pbar = tqdm(
             enumerate(dataloaders["train"], start=1),
             desc=f"epoch {epoch}",
             total=total,
+            disable=disable_tqdm,
         )
         for i, batch in pbar:
             if epoch == start_epoch and i < start_iteration:
@@ -108,52 +151,33 @@ def main(config: TrainingConfig) -> None:
             if step % config.log_every == 0:
                 avg_loss /= config.log_every
                 pbar.set_postfix(avg_loss=avg_loss)
-                wandb.log(
-                    {
-                        "train/avg_loss": avg_loss,
-                        "train/cum_loss": cum_loss / i,
-                        "train/lr": scheduler.get_last_lr()[0],
-                    },
-                    step=step,
-                )
+                if is_main:
+                    wandb.log(
+                        {
+                            "train/avg_loss": avg_loss,
+                            "train/cum_loss": cum_loss / i,
+                            "train/lr": scheduler.get_last_lr()[0],
+                        },
+                        step=step,
+                    )
                 avg_loss = 0.0
             if step % config.checkpoint_every == 0:
                 gc.collect()  # collect garbage before validation to free up memory
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
                 val_loss = validate_model(
-                    model, dataloaders["validation"], device, config.batch_size * 4
+                    model,
+                    dataloaders["validation"],
+                    device,
+                    config.batch_size * 4,
+                    world_size,
                 )
                 pbar.set_postfix(val_loss=val_loss)
-                wandb.log({"validation/loss": val_loss}, step=step)
-                ckpt_path = config.checkpoint_dir / f"checkpoint_step_{step}.pt"
-                save_checkpoint(
-                    ckpt_path,
-                    model,
-                    optimizer,
-                    scheduler,
-                    early_stopping,
-                    epoch=epoch,
-                    iteration=i,
-                    best_val_loss=best_val_loss,
-                )
-                wandb.save(str(ckpt_path), base_path=str(config.run_dir))
-                video_path = plot_video(
-                    model,
-                    StreamDataset(split="validation", im_s=config.image_size),
-                    save_path=config.plot_dir / f"driving_video_step_{step}.mp4",
-                    device=device,
-                )
-                wandb.log(
-                    {"video/prediction": wandb.Video(str(video_path), fps=10)},
-                    step=step,
-                )
-                model.train()  # set back to train mode after validation
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
+                if is_main:
+                    wandb.log({"validation/loss": val_loss}, step=step)
+                    ckpt_path = config.checkpoint_dir / f"checkpoint_step_{step}.pt"
                     save_checkpoint(
-                        best_ckpt_path,
-                        model,
+                        ckpt_path,
+                        raw_model,
                         optimizer,
                         scheduler,
                         early_stopping,
@@ -161,41 +185,73 @@ def main(config: TrainingConfig) -> None:
                         iteration=i,
                         best_val_loss=best_val_loss,
                     )
-                    wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
-                    best_video_path = plot_video(
-                        model,
-                        StreamDataset(split="test", im_s=config.image_size),
-                        save_path=config.plot_dir / "best_driving_video.mp4",
+                    wandb.save(str(ckpt_path), base_path=str(config.run_dir))
+                    video_path = plot_video(
+                        raw_model,
+                        StreamDataset(split="validation", im_s=config.image_size),
+                        save_path=config.plot_dir / f"driving_video_step_{step}.mp4",
                         device=device,
                     )
                     wandb.log(
-                        {
-                            "video/best_prediction": wandb.Video(
-                                str(best_video_path), fps=10
-                            )
-                        },
+                        {"video/prediction": wandb.Video(str(video_path), fps=10)},
                         step=step,
                     )
+                if world_size > 1:
+                    dist.barrier()
+                model.train()  # set back to train mode after validation
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    if is_main:
+                        best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
+                        save_checkpoint(
+                            best_ckpt_path,
+                            raw_model,
+                            optimizer,
+                            scheduler,
+                            early_stopping,
+                            epoch=epoch,
+                            iteration=i,
+                            best_val_loss=best_val_loss,
+                        )
+                        wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
+                        best_video_path = plot_video(
+                            raw_model,
+                            StreamDataset(split="test", im_s=config.image_size),
+                            save_path=config.plot_dir / "best_driving_video.mp4",
+                            device=device,
+                        )
+                        wandb.log(
+                            {
+                                "video/best_prediction": wandb.Video(
+                                    str(best_video_path), fps=10
+                                )
+                            },
+                            step=step,
+                        )
+                    if world_size > 1:
+                        dist.barrier()
 
                 if early_stopping.step(val_loss):
-                    print(
-                        f"Early stopping at step {step} with validation loss {val_loss:.4f}"
-                    )
+                    if is_main:
+                        print(
+                            f"Early stopping at step {step} with validation loss {val_loss:.4f}"
+                        )
                     stopped = True
                     break
 
         if stopped:
             break
 
-        gc.collect()  # collect garbage before validation to free up memory
-        torch.cuda.empty_cache()  # clear CUDA cache before validation
-        test_loss = validate_model(
-            model, dataloaders["test"], device, config.batch_size * 4
-        )
+    gc.collect()  # collect garbage before validation to free up memory
+    torch.cuda.empty_cache()  # clear CUDA cache before validation
+    test_loss = validate_model(
+        model, dataloaders["test"], device, config.batch_size * 4, world_size
+    )
+    if is_main:
         final_ckpt_path = config.checkpoint_dir / "final_checkpoint.pt"
         save_checkpoint(
             final_ckpt_path,
-            model,
+            raw_model,
             optimizer,
             scheduler,
             early_stopping,
@@ -205,7 +261,7 @@ def main(config: TrainingConfig) -> None:
         )
         wandb.save(str(final_ckpt_path), base_path=str(config.run_dir))
         final_video_path = plot_video(
-            model,
+            raw_model,
             StreamDataset(split="test", im_s=config.image_size),
             save_path=config.plot_dir / "final_driving_video.mp4",
             device=device,
@@ -214,13 +270,29 @@ def main(config: TrainingConfig) -> None:
             {"video/final_prediction": wandb.Video(str(final_video_path), fps=10)},
         )
 
-    print("final test loss", test_loss)
-    wandb.log({"test/loss": test_loss})
-    wandb.finish()
-    print("Training complete.")
+    if is_main:
+        print("final test loss", test_loss)
+        wandb.log({"test/loss": test_loss})
+        wandb.finish()
+        print("Training complete.")
+
+    if world_size > 1:
+        cleanup_ddp()
 
 
 if __name__ == "__main__":
     parser = HfArgumentParser(TrainingConfig)  # pyright: ignore[reportArgumentType]
-    args = parser.parse_args_into_dataclasses()
-    main(args[0])
+    config = parser.parse_args_into_dataclasses()[0]
+
+    if "LOCAL_RANK" in os.environ:
+        # Launched via torchrun — env vars override config
+        local_rank = int(os.environ["LOCAL_RANK"])
+        config.n_gpus = int(os.environ.get("LOCAL_WORLD_SIZE", config.n_gpus))  # pyright: ignore[reportArgumentType]
+        total_world_size = int(os.environ["WORLD_SIZE"])
+        config.n_nodes = total_world_size // config.n_gpus
+        config.node_rank = int(os.environ["RANK"]) // config.n_gpus
+        main(local_rank, config)
+    elif config.n_gpus * config.n_nodes > 1:
+        mp.spawn(main, args=(config,), nprocs=config.n_gpus, join=True)  # pyright: ignore[reportPrivateImportUsage, reportAttributeAccessIssue]
+    else:
+        main(0, config)

@@ -1,6 +1,7 @@
 from math import ceil
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.nn.functional import mse_loss
 from torch.utils.data import DataLoader
@@ -9,7 +10,11 @@ from tqdm import tqdm
 
 @torch.inference_mode()
 def validate_model(
-    model: nn.Module, dataloader: DataLoader, device: torch.device, batch_size: int
+    model: nn.Module,
+    dataloader: DataLoader,
+    device: torch.device,
+    batch_size: int,
+    world_size: int = 1,
 ):
     model.eval()
     cum_loss = 0.0
@@ -23,5 +28,10 @@ def validate_model(
         cum_loss += loss.item()
 
         pbar.set_postfix(loss=cum_loss / i)
+
+    if world_size > 1:
+        loss_tensor = torch.tensor([cum_loss, float(i)], device=device)
+        dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
+        return (loss_tensor[0] / loss_tensor[1]).item()
 
     return cum_loss / i

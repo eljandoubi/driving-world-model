@@ -47,6 +47,46 @@ uv run python train.py --learning_rate 1e-4 --scheduler_t0 20 --scheduler_t_mult
 uv run python train.py --resume runs/<run_id>/checkpoints/best_checkpoint.pt --run_id <run_id>
 ```
 
+### Distributed Training
+
+Training supports DistributedDataParallel (DDP) for multi-GPU and multi-node setups. Data is sharded across ranks, gradients are synchronized automatically, and only rank 0 handles logging, checkpointing, and video generation.
+
+#### Single-node multi-GPU
+
+```bash
+uv run python train.py --n_gpus 4
+```
+
+This uses `mp.spawn` to launch one process per GPU on the local machine.
+
+#### Multi-node
+
+Each machine runs the script independently. Set `MASTER_ADDR` to the IP of node 0 so all nodes can rendezvous.
+
+```bash
+# Node 0 (master):
+MASTER_ADDR=10.0.0.1 MASTER_PORT=12355 uv run python train.py \
+    --n_gpus 4 --n_nodes 2 --node_rank 0
+
+# Node 1:
+MASTER_ADDR=10.0.0.1 MASTER_PORT=12355 uv run python train.py \
+    --n_gpus 4 --n_nodes 2 --node_rank 1
+```
+
+#### Multi-node with `torchrun`
+
+`torchrun` handles rendezvous and environment variables automatically. When `LOCAL_RANK` is detected in the environment, the script reads rank/world-size from `torchrun` instead of the CLI flags.
+
+```bash
+# Node 0:
+torchrun --nproc_per_node=4 --nnodes=2 --node_rank=0 \
+    --master_addr=10.0.0.1 --master_port=12355 train.py
+
+# Node 1:
+torchrun --nproc_per_node=4 --nnodes=2 --node_rank=1 \
+    --master_addr=10.0.0.1 --master_port=12355 train.py
+```
+
 ## Default Configuration
 
 ### Model
@@ -78,12 +118,20 @@ uv run python train.py --resume runs/<run_id>/checkpoints/best_checkpoint.pt --r
 | `log_every` | `1000` | Log training loss every N steps |
 | `checkpoint_every` | `10000` | Validate & checkpoint every N steps |
 
+### Distributed
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_gpus` | `1` | GPUs per node |
+| `n_nodes` | `1` | Number of nodes (machines) |
+| `node_rank` | `0` | This node's rank (0-indexed) |
+
 ### Data
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `image_size` | `256` | Input image resize resolution |
-| `batch_size` | `8` | Training batch size |
+| `batch_size` | `8` | Training batch size (per GPU) |
 | `num_workers` | `8` | DataLoader workers |
 | `persistent_workers` | `True` | Keep workers alive between epochs |
 | `pin_memory` | `True` | Pin memory for GPU transfer |
