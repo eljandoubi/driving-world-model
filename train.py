@@ -122,6 +122,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
 
     model.train()
     stopped = False
+    if world_size > 1:
+        stopped_tensor = torch.tensor([0], device=device)
     avg_loss = 0.0
     for epoch in tqdm(
         range(start_epoch, config.epochs), desc="training epochs", disable=disable_tqdm
@@ -145,13 +147,14 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
             optimizer.step()
             scheduler.step()
-            cum_loss += loss.item()
-            avg_loss += loss.item()
-            pbar.set_postfix(loss=cum_loss / i)
-            if step % config.log_every == 0:
-                avg_loss /= config.log_every
-                pbar.set_postfix(avg_loss=avg_loss)
-                if is_main:
+            if is_main:
+                loss_value = loss.item()
+                cum_loss += loss_value
+                avg_loss += loss_value
+                pbar.set_postfix(loss=cum_loss / i)
+                if step % config.log_every == 0:
+                    avg_loss /= config.log_every
+                    pbar.set_postfix(avg_loss=avg_loss)
                     wandb.log(
                         {
                             "train/avg_loss": avg_loss,
@@ -160,7 +163,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         },
                         step=step,
                     )
-                avg_loss = 0.0
+                    avg_loss = 0.0
             if step % config.checkpoint_every == 0:
                 gc.collect()  # collect garbage before validation to free up memory
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
@@ -172,8 +175,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                     world_size,
                     disable_tqdm=disable_tqdm,  # show tqdm for validation only on main process
                 )
-                pbar.set_postfix(val_loss=val_loss)
                 if is_main:
+                    pbar.set_postfix(val_loss=val_loss)
                     wandb.log({"validation/loss": val_loss}, step=step)
                     ckpt_path = config.checkpoint_dir / f"checkpoint_step_{step}.pt"
                     save_checkpoint(
@@ -200,35 +203,34 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                 if world_size > 1:
                     dist.barrier()
                 model.train()  # set back to train mode after validation
-                if val_loss < best_val_loss:
+                if val_loss < best_val_loss and is_main:
                     best_val_loss = val_loss
-                    if is_main:
-                        best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
-                        save_checkpoint(
-                            best_ckpt_path,
-                            raw_model,
-                            optimizer,
-                            scheduler,
-                            early_stopping,
-                            epoch=epoch,
-                            iteration=i,
-                            best_val_loss=best_val_loss,
-                        )
-                        wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
-                        best_video_path = plot_video(
-                            raw_model,
-                            StreamDataset(split="test", im_s=config.image_size),
-                            save_path=config.plot_dir / "best_driving_video.mp4",
-                            device=device,
-                        )
-                        wandb.log(
-                            {
-                                "video/best_prediction": wandb.Video(
-                                    str(best_video_path), fps=10
-                                )
-                            },
-                            step=step,
-                        )
+                    best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
+                    save_checkpoint(
+                        best_ckpt_path,
+                        raw_model,
+                        optimizer,
+                        scheduler,
+                        early_stopping,
+                        epoch=epoch,
+                        iteration=i,
+                        best_val_loss=best_val_loss,
+                    )
+                    wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
+                    best_video_path = plot_video(
+                        raw_model,
+                        StreamDataset(split="test", im_s=config.image_size),
+                        save_path=config.plot_dir / "best_driving_video.mp4",
+                        device=device,
+                    )
+                    wandb.log(
+                        {
+                            "video/best_prediction": wandb.Video(
+                                str(best_video_path), fps=10
+                            )
+                        },
+                        step=step,
+                    )
                     if world_size > 1:
                         dist.barrier()
 
@@ -238,8 +240,20 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                             f"Early stopping at step {step} with validation loss {val_loss:.4f}"
                         )
                     stopped = True
+                # Propagate stopped flag to all workers
+                if world_size > 1:
+                    if is_main:
+                        stopped_tensor[0] = int(stopped)
+                    dist.broadcast(stopped_tensor, src=0)
+                    stopped = bool(stopped_tensor[0].item())
+                if stopped:
                     break
 
+        if world_size > 1:
+            if is_main:
+                stopped_tensor[0] = int(stopped)
+            dist.broadcast(stopped_tensor, src=0)
+            stopped = bool(stopped_tensor[0].item())
         if stopped:
             break
 
@@ -275,8 +289,6 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         wandb.log(
             {"video/final_prediction": wandb.Video(str(final_video_path), fps=10)},
         )
-
-    if is_main:
         print("final test loss", test_loss)
         wandb.log({"test/loss": test_loss})
         wandb.finish()
