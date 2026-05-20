@@ -15,11 +15,17 @@ def validate_model(
     device: torch.device,
     batch_size: int,
     world_size: int = 1,
+    disable_tqdm: bool = False,
 ):
     model.eval()
     cum_loss = 0.0
     total = int(ceil(len(dataloader)) / float(batch_size))
-    pbar = tqdm(enumerate(dataloader, start=1), desc="validate", total=total)
+    pbar = tqdm(
+        enumerate(dataloader, start=1),
+        desc="validate",
+        total=total,
+        disable=disable_tqdm,
+    )
 
     for i, batch in pbar:
         batch = batch.to(device, non_blocking=True)

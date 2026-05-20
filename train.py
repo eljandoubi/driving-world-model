@@ -91,7 +91,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         base_name=config.base_name,
         num_tokens=config.num_tokens,
         hidden_dim=config.hidden_dim,
-    ).to(device)
+    ).to(device, non_blocking=True)
 
     if world_size > 1:
         model = DDP(raw_model, device_ids=[local_rank])
@@ -122,11 +122,11 @@ def main(local_rank: int, config: TrainingConfig) -> None:
 
     model.train()
     stopped = False
+    avg_loss = 0.0
     for epoch in tqdm(
         range(start_epoch, config.epochs), desc="training epochs", disable=disable_tqdm
     ):
         cum_loss = 0.0
-        avg_loss = 0.0
         pbar = tqdm(
             enumerate(dataloaders["train"], start=1),
             desc=f"epoch {epoch}",
@@ -170,6 +170,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                     device,
                     config.batch_size * 4,
                     world_size,
+                    disable_tqdm=disable_tqdm,  # show tqdm for validation only on main process
                 )
                 pbar.set_postfix(val_loss=val_loss)
                 if is_main:
@@ -245,7 +246,12 @@ def main(local_rank: int, config: TrainingConfig) -> None:
     gc.collect()  # collect garbage before validation to free up memory
     torch.cuda.empty_cache()  # clear CUDA cache before validation
     test_loss = validate_model(
-        model, dataloaders["test"], device, config.batch_size * 4, world_size
+        model,
+        dataloaders["test"],
+        device,
+        config.batch_size * 4,
+        world_size,
+        disable_tqdm=disable_tqdm,
     )
     if is_main:
         final_ckpt_path = config.checkpoint_dir / "final_checkpoint.pt"

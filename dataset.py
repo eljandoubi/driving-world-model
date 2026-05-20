@@ -46,7 +46,8 @@ class StreamDataset(IterableDataset):
         data = TensorDict()
         data["x_t"] = self.trans(sample["image_front"])
         data["a_t"] = torch.tensor(
-            [sample["throttle"], sample["steer"], sample["brake"]]
+            [sample["throttle"], sample["steer"], sample["brake"]],
+            dtype=torch.float32,
         )
         meta = {}
         meta["run_id"] = sample["run_id"]
