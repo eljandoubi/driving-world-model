@@ -92,7 +92,7 @@ class TrainingConfig:
         if self.num_workers is None:
             self.num_workers = max(
                 1,
-                (cpu_count() - self.n_gpus) // (self.n_gpus * self.batch_size),  # pyright: ignore[reportOptionalOperand]
+                (cpu_count() * 2) // (self.n_gpus * 3),  # pyright: ignore[reportOptionalOperand]
             )
 
     def set_id(self, run_id: str) -> None:
