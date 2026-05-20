@@ -90,9 +90,9 @@ class TrainingConfig:
         self.log_every = int(ceil(self.log_every / count))
         self.checkpoint_every = int(ceil(self.checkpoint_every / count))
         if self.num_workers is None:
-            self.num_workers = max(
-                1,
-                (cpu_count() * 2) // (self.n_gpus * 3),  # pyright: ignore[reportOptionalOperand]
+            self.num_workers = min(
+                max(1, self.batch_size),
+                cpu_count() // self.n_gpus - 1,  # pyright: ignore[reportOptionalOperand]
             )
 
     def set_id(self, run_id: str) -> None:
