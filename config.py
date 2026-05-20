@@ -45,16 +45,12 @@ class TrainingConfig:
     run_id: str | None = None  # Optional run ID for logging (overrides auto-generated)
 
     def __post_init__(self) -> None:
-        if getenv("RANK") is not None:
-            self.node_rank = int(getenv("RANK")) // self.n_gpus  # pyright: ignore[reportArgumentType]
+
         assert self.n_gpus > 0, "n_gpus must be > 0"
         assert self.n_nodes > 0, "n_nodes must be > 0"
         assert self.node_rank >= 0 and self.node_rank < self.n_nodes, (
             f"node_rank must be in [0, n_nodes); got {self.node_rank}"
         )
-        count = float(self.n_gpus * self.n_nodes * self.batch_size)
-        self.log_every = int(ceil(self.log_every / count))
-        self.checkpoint_every = int(ceil(self.checkpoint_every / count))
         assert self.num_tokens > 0, "num_tokens must be > 0"
         assert self.hidden_dim > 0, "hidden_dim must be > 0"
         assert self.activation in (
@@ -88,6 +84,11 @@ class TrainingConfig:
         assert self.checkpoint_every % self.log_every == 0, (
             "checkpoint_every must be a multiple of log_every"
         )
+        if getenv("RANK") is not None:
+            self.node_rank = int(getenv("RANK")) // self.n_gpus  # pyright: ignore[reportArgumentType]
+        count = float(self.n_gpus * self.n_nodes * self.batch_size)
+        self.log_every = int(ceil(self.log_every / count))
+        self.checkpoint_every = int(ceil(self.checkpoint_every / count))
 
     def set_id(self, run_id: str) -> None:
         """Set run ID (for logging) after initialization."""
