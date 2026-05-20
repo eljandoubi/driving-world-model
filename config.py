@@ -24,7 +24,7 @@ class TrainingConfig:
     pin_memory: bool = True
     learning_rate: float = 1e-4
     image_size: int = 256
-    num_workers: int = 2
+    num_workers: int = 4
     epochs: int = 100000
     max_grad_norm: float = 1.0
     batch_size: int = 2
