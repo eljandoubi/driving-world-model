@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from math import ceil
-from os import getenv
+from os import cpu_count, getenv
 from pathlib import Path
 from typing import Literal
 
@@ -24,7 +24,7 @@ class TrainingConfig:
     pin_memory: bool = True
     learning_rate: float = 1e-4
     image_size: int = 256
-    num_workers: int = 4
+    num_workers: int = None  # pyright: ignore[reportAssignmentType]
     epochs: int = 100000
     max_grad_norm: float = 1.0
     batch_size: int = 2
@@ -89,6 +89,11 @@ class TrainingConfig:
         count = float(self.n_gpus * self.n_nodes * self.batch_size)
         self.log_every = int(ceil(self.log_every / count))
         self.checkpoint_every = int(ceil(self.checkpoint_every / count))
+        if self.num_workers is None:
+            self.num_workers = max(
+                1,
+                (cpu_count() - self.n_gpus) // (self.n_gpus * self.batch_size),  # pyright: ignore[reportOptionalOperand]
+            )
 
     def set_id(self, run_id: str) -> None:
         """Set run ID (for logging) after initialization."""
