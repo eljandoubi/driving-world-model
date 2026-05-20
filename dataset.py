@@ -1,5 +1,3 @@
-from math import ceil
-
 import torch
 from datasets import load_dataset
 from torch.utils.data import IterableDataset, get_worker_info
@@ -55,31 +53,26 @@ class StreamDataset(IterableDataset):
         return data, meta
 
     def __iter__(self):
-        total = len(self)
-
-        if self.world_size > 1:
-            per_rank = total // self.world_size
-            rank_start = self.rank * per_rank
-            rank_size = per_rank
-        else:
-            rank_start = 0
-            rank_size = total
-
         worker_info = get_worker_info()
-        if worker_info is not None:
-            per_worker = int(ceil(rank_size / float(worker_info.num_workers)))
-            worker_id = worker_info.id
-            worker_start = worker_id * per_worker
-            start = rank_start + worker_start
-            chunk = min(per_worker, rank_size - worker_start)
-        else:
-            start = rank_start
-            chunk = rank_size
 
-        itb = self.main_stream
-        if start > 0:
-            itb = itb.skip(start)
-        itb = itb.take(chunk)
+        # Determine unique ID for each worker-process across all GPUs
+        if worker_info is not None:
+            num_workers = worker_info.num_workers
+            worker_id = worker_info.id
+            # Global shard index across all GPUs and workers
+            global_worker_id = self.rank * num_workers + worker_id
+            total_shards = self.world_size * num_workers
+        else:
+            global_worker_id = self.rank
+            total_shards = self.world_size
+
+        # Let Hugging Face handle the distributed partitioning efficiently!
+        if total_shards > 1:
+            itb = self.main_stream.shard(
+                num_shards=total_shards, index=global_worker_id
+            )
+        else:
+            itb = self.main_stream
 
         run_id = ""
         for it in itb:

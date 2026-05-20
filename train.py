@@ -1,5 +1,6 @@
 import gc
 import os
+from math import ceil
 
 import torch
 import torch.distributed as dist
@@ -16,13 +17,13 @@ from transformers import HfArgumentParser
 
 from checkpoint import load_checkpoint, save_checkpoint
 from config import TrainingConfig
-from dataset import StreamDataset, ceil
-from early_stopping import EarlyStopping
+from dataset import StreamDataset
+from early_stopping import EarlyStopping, logger
 from model import WorldModel
 from plot import plot_video
 from validate import tqdm, validate_model
 
-print("Loading environment variables...", load_dotenv())
+logger.info("Loading environment variables...", load_dotenv())
 
 
 def setup_ddp(local_rank: int, global_rank: int, world_size: int) -> None:
@@ -47,7 +48,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    print(f"[Rank {global_rank}] using device {device}")
+    logger.info(f"[Rank {global_rank}] using device {device}")
 
     # --- WANDB INIT (rank 0 only) ---
     if is_main:
@@ -106,12 +107,14 @@ def main(local_rank: int, config: TrainingConfig) -> None:
 
     if config.resume:
         if is_main:
-            print(f"Resuming from checkpoint {config.resume}...")
+            logger.info(f"Resuming from checkpoint {config.resume}...")
         start_epoch, start_iteration, best_val_loss = load_checkpoint(
             config.resume, raw_model, optimizer, scheduler, device, early_stopping
         )
         if is_main:
-            print(f"Resumed from epoch {start_epoch}, iteration {start_iteration}")
+            logger.info(
+                f"Resumed from epoch {start_epoch}, iteration {start_iteration}"
+            )
     else:
         start_epoch = 0
         best_val_loss = float("inf")
@@ -236,7 +239,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
 
                 if early_stopping.step(val_loss):
                     if is_main:
-                        print(
+                        logger.info(
                             f"Early stopping at step {step} with validation loss {val_loss:.4f}"
                         )
                     stopped = True
@@ -249,11 +252,6 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                 if stopped:
                     break
 
-        if world_size > 1:
-            if is_main:
-                stopped_tensor[0] = int(stopped)
-            dist.broadcast(stopped_tensor, src=0)
-            stopped = bool(stopped_tensor[0].item())
         if stopped:
             break
 
@@ -289,10 +287,10 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         wandb.log(
             {"video/final_prediction": wandb.Video(str(final_video_path), fps=10)},
         )
-        print("final test loss", test_loss)
+        logger.info("final test loss %f", test_loss)
         wandb.log({"test/loss": test_loss})
         wandb.finish()
-        print("Training complete.")
+        logger.info("Training complete.")
 
     if world_size > 1:
         cleanup_ddp()
