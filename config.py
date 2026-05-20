@@ -97,12 +97,11 @@ class TrainingConfig:
     def update_paths(self) -> None:
         """Update checkpoint and plot directories based on base run directory."""
         assert self.run_id is not None, "run_id must be set before updating paths"
-
+        assert isinstance(self.checkpoint_dir, Path) and isinstance(
+            self.plot_dir, Path
+        ), "checkpoint_dir and plot_dir must be Path objects after update_paths()"
         self.run_dir = Path(self.runs_dir) / self.run_id
         self.checkpoint_dir = self.run_dir / Path(self.checkpoint_dir)
         self.plot_dir = self.run_dir / Path(self.plot_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.plot_dir.mkdir(parents=True, exist_ok=True)
-        assert isinstance(self.checkpoint_dir, Path) and isinstance(
-            self.plot_dir, Path
-        ), "checkpoint_dir and plot_dir must be Path objects after update_paths()"
