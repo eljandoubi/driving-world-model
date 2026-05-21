@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from diffusers.models.attention import FeedForward
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 
 class ActionEmbedder(FeedForward):
@@ -51,11 +52,22 @@ class WorldModel(nn.Module):
             hidden_dim=hidden_dim,
         )
 
-    def forward(self, a_t: torch.Tensor, x_t: torch.Tensor):
+        scheduler = DDPMScheduler.from_pretrained(
+            "runwayml/stable-diffusion-v1-5",
+            subfolder="scheduler"
+        )
+        self.num_timesteps = scheduler.config.num_train_timesteps  # pyright: ignore[reportAttributeAccessIssue]
+
+    def forward(self, a_t: torch.Tensor, x_t: torch.Tensor, t: torch.Tensor | None = None):
         cond = self.action_embedder(a_t)  # (B, tokens, dim)
         B = x_t.shape[0]
-        t = torch.ones((B,), dtype=torch.long, device=x_t.device)
-        x_tp1_pred = self.unet(
+        if t is None:
+            if self.training:
+                t = torch.randint(0, self.num_timesteps, (B,), device=x_t.device)
+            else:
+                t = torch.zeros((B,), dtype=torch.long, device=x_t.device)
+        
+        pred_delta  = self.unet(
             sample=x_t, timestep=t, encoder_hidden_states=cond
         ).sample
-        return x_tp1_pred
+        return pred_delta 

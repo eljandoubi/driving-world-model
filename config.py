@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from math import ceil
-from os import cpu_count, getenv
+from os import getenv
 from pathlib import Path
 from typing import Literal
 
@@ -9,9 +9,9 @@ from typing import Literal
 class TrainingConfig:
     """world model training configuration."""
 
-    num_tokens: int = 8
+    num_tokens: int = 16
     base_name: str = "runwayml/stable-diffusion-v1-5"
-    hidden_dim: int = 1024
+    hidden_dim: int = 2048
     activation: Literal[
         "gelu",
         "gelu-approximate",
@@ -20,15 +20,14 @@ class TrainingConfig:
         "swiglu",
         "linear-silu",
     ] = "swiglu"
-    persistent_workers: bool = True
+    loss_type: Literal["l2", "l1"] = "l1"
     pin_memory: bool = True
     learning_rate: float = 1e-4
     image_size: int = 256
-    num_workers: int = None  # pyright: ignore[reportAssignmentType]
     epochs: int = 100000
     max_grad_norm: float = 1.0
     batch_size: int = 2
-    dropout: float = 0.1
+    dropout: float = 0.0
     log_every: int = 1000
     checkpoint_every: int = 10000
     patience: int = 10
@@ -38,6 +37,7 @@ class TrainingConfig:
     n_gpus: int = 1
     n_nodes: int = 1
     node_rank: int = 0
+    buffer_size: int = 1000
     runs_dir: str | Path = "runs"
     checkpoint_dir: Path = Path("checkpoints")
     plot_dir: Path = Path("plots")
@@ -66,7 +66,7 @@ class TrainingConfig:
             "geglu-approximate",
             "swiglu",
             "linear-silu",; got {self.activation}"""
-
+        assert self.loss_type in ("l2", "l1"), f"loss_type must be 'l2' or 'l1'; got {self.loss_type}"
         assert self.learning_rate > 0, "learning_rate must be > 0"
         assert self.epochs > 0, "epochs must be > 0"
         assert self.max_grad_norm > 0, "max_grad_norm must be > 0"
@@ -89,11 +89,7 @@ class TrainingConfig:
         count = float(self.n_gpus * self.n_nodes * self.batch_size)
         self.log_every = int(ceil(self.log_every / count))
         self.checkpoint_every = int(ceil(self.checkpoint_every / count))
-        if self.num_workers is None:
-            self.num_workers = min(
-                max(1, self.batch_size),
-                cpu_count() // self.n_gpus - 1,  # pyright: ignore[reportOptionalOperand]
-            )
+
 
     def set_id(self, run_id: str) -> None:
         """Set run ID (for logging) after initialization."""

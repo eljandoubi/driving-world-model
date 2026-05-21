@@ -1,18 +1,16 @@
 import gc
 import os
-from math import ceil
 
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import wandb
 from dotenv import load_dotenv
-from torch.nn.functional import mse_loss
+from torch.nn.functional import l1_loss, mse_loss
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.utils import clip_grad_norm_
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-from torch.utils.data import DataLoader
 from transformers import HfArgumentParser
 
 from checkpoint import load_checkpoint, save_checkpoint
@@ -72,21 +70,31 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             allow_val_change=True,
         )
 
+    loss_fn = mse_loss if config.loss_type == "l2" else l1_loss
+
     dataloaders = {}
     for k in ["train", "validation", "test"]:
-        dataloaders[k] = DataLoader(
-            StreamDataset(
-                split=k,
-                im_s=config.image_size,
-                rank=global_rank,
-                world_size=world_size,
-            ),
-            batch_size=config.batch_size,
-            num_workers=config.num_workers,
-            persistent_workers=config.persistent_workers,
-            pin_memory=config.pin_memory,
-            drop_last=(world_size > 1),
-        )
+        for prefix in ["video", ""]:
+            if prefix == "video" and k == "train":
+                continue  # only create video dataloaders for validation and test sets
+            if prefix == "video":
+                batch_size = 1
+                buffer_size = config.buffer_size// 10  # use smaller buffer size for video dataloaders to reduce memory usage
+            else:
+                batch_size = config.batch_size
+                if k != "train":
+                    batch_size *= 4  # use larger batch size for validation and test to speed up evaluation
+                buffer_size = config.buffer_size
+            key = f"{prefix}_{k}" if prefix else k
+            dataloaders[key] = StreamDataset(
+                    split=k,
+                    im_s=config.image_size,
+                    rank=global_rank,
+                    world_size=world_size,
+                    batch_size=batch_size,
+                    pin_memory=config.pin_memory,
+                    buffer_size=buffer_size,
+            )
 
     raw_model = WorldModel(
         base_name=config.base_name,
@@ -120,7 +128,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         best_val_loss = float("inf")
         start_iteration = 0
 
-    total = int(ceil(len(dataloaders["train"])) / float(config.batch_size))
+    total=len(dataloaders["train"])
     disable_tqdm = not is_main
 
     model.train()
@@ -144,8 +152,9 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             step = epoch * total + i
             optimizer.zero_grad(set_to_none=True)
             batch = batch.to(device, non_blocking=True)
-            x_tp1_pred = model(batch["a_t"], batch["x_t"])
-            loss = mse_loss(x_tp1_pred, batch["x_tp1"])
+            pred_delta  = model(batch["a_t"], batch["x_t"])
+            target_delta = batch["x_tp1"] - batch["x_t"]
+            loss = loss_fn(pred_delta , target_delta)
             loss.backward()
             clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
             optimizer.step()
@@ -174,7 +183,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                     model,
                     dataloaders["validation"],
                     device,
-                    config.batch_size * 4,
+                    loss_fn,
                     world_size,
                     disable_tqdm=disable_tqdm,  # show tqdm for validation only on main process
                 )
@@ -195,7 +204,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                     wandb.save(str(ckpt_path), base_path=str(config.run_dir))
                     video_path = plot_video(
                         raw_model,
-                        StreamDataset(split="validation", im_s=config.image_size),
+                        dataloaders["video_validation"],
                         save_path=config.plot_dir / f"driving_video_step_{step}.mp4",
                         device=device,
                     )
@@ -222,7 +231,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                     wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
                     best_video_path = plot_video(
                         raw_model,
-                        StreamDataset(split="test", im_s=config.image_size),
+                        dataloaders["video_test"],
                         save_path=config.plot_dir / "best_driving_video.mp4",
                         device=device,
                     )
@@ -261,7 +270,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         model,
         dataloaders["test"],
         device,
-        config.batch_size * 4,
+        loss_fn,
         world_size,
         disable_tqdm=disable_tqdm,
     )
@@ -280,7 +289,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         wandb.save(str(final_ckpt_path), base_path=str(config.run_dir))
         final_video_path = plot_video(
             raw_model,
-            StreamDataset(split="test", im_s=config.image_size),
+            dataloaders["video_test"],
             save_path=config.plot_dir / "final_driving_video.mp4",
             device=device,
         )

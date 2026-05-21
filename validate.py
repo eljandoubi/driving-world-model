@@ -1,11 +1,10 @@
-from math import ceil
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.nn.functional import mse_loss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from transformers import Callable
 
 
 @torch.inference_mode()
@@ -13,24 +12,24 @@ def validate_model(
     model: nn.Module,
     dataloader: DataLoader,
     device: torch.device,
-    batch_size: int,
+    loss_fn: Callable,
     world_size: int = 1,
     disable_tqdm: bool = False,
 ):
     model.eval()
     cum_loss = 0.0
-    total = int(ceil(len(dataloader)) / float(batch_size))
     pbar = tqdm(
         enumerate(dataloader, start=1),
         desc="validate",
-        total=total,
+        total=len(dataloader),
         disable=disable_tqdm,
     )
 
     for i, batch in pbar:
         batch = batch.to(device, non_blocking=True)
-        x_tp1_pred = model(batch["a_t"], batch["x_t"])
-        loss = mse_loss(x_tp1_pred, batch["x_tp1"])
+        pred_delta  = model(batch["a_t"], batch["x_t"])
+        target_delta = batch["x_tp1"] - batch["x_t"]
+        loss = loss_fn(pred_delta , target_delta)
         cum_loss += loss.item()
 
         pbar.set_postfix(loss=cum_loss / i)
