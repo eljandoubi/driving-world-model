@@ -1,9 +1,10 @@
+from typing import Callable
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import Callable
 
 
 @torch.inference_mode()
