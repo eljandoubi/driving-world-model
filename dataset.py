@@ -1,5 +1,3 @@
-
-
 import queue
 import threading
 from math import ceil
@@ -16,7 +14,7 @@ class TensorDict(dict):
             if hasattr(v, "to"):
                 self[k] = v.to(device, non_blocking=non_blocking)
         return self
-    
+
     def pin_memory(self, pin_memory: bool = True):
         if not pin_memory:
             return self
@@ -89,10 +87,9 @@ class StreamDataset:
             current_data["x_tp1"] = data["x_t"]
             yield current_data
             current_data = data
-    
+
     def __len__(self):
         return self._len
-    
 
     def _collate_fn(self, batch: dict[str, list[torch.Tensor]]) -> TensorDict:
         collated = TensorDict()
@@ -104,18 +101,24 @@ class StreamDataset:
         q = queue.Queue(maxsize=self.buffer_size)
         stop_token = object()
 
-        iterds = IterableDataset.from_generator(self._generate_samples
-                                                ).batch(batch_size=self.batch_size,
-                                                        drop_last_batch=(self.world_size > 1))
+        iterds = IterableDataset.from_generator(self._generate_samples).batch(
+            batch_size=self.batch_size, drop_last_batch=(self.world_size > 1)
+        )
 
         def worker():
-            pbar = tqdm(iterable=iterds, total=self.buffer_size, desc="Prefetching", unit="samples", disable=self.rank > 0) 
+            pbar = tqdm(
+                iterable=iterds,
+                total=self.buffer_size,
+                desc="Prefetching",
+                unit="samples",
+                disable=self.rank > 0,
+            )
             for sample in pbar:
                 sample = self._collate_fn(sample)
                 q.put(sample.pin_memory(self.pin_memory))
                 pbar.n = len(q.queue)
                 pbar.refresh()
-                
+
             q.put(stop_token)
 
         thread = threading.Thread(target=worker, daemon=True)

@@ -1,4 +1,3 @@
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -27,9 +26,9 @@ def validate_model(
 
     for i, batch in pbar:
         batch = batch.to(device, non_blocking=True)
-        pred_delta  = model(batch["a_t"], batch["x_t"])
+        pred_delta = model(batch["a_t"], batch["x_t"])
         target_delta = batch["x_tp1"] - batch["x_t"]
-        loss = loss_fn(pred_delta , target_delta)
+        loss = loss_fn(pred_delta, target_delta)
         cum_loss += loss.item()
 
         pbar.set_postfix(loss=cum_loss / i)

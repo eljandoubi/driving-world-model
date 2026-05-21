@@ -66,7 +66,9 @@ class TrainingConfig:
             "geglu-approximate",
             "swiglu",
             "linear-silu",; got {self.activation}"""
-        assert self.loss_type in ("l2", "l1"), f"loss_type must be 'l2' or 'l1'; got {self.loss_type}"
+        assert self.loss_type in ("l2", "l1"), (
+            f"loss_type must be 'l2' or 'l1'; got {self.loss_type}"
+        )
         assert self.learning_rate > 0, "learning_rate must be > 0"
         assert self.epochs > 0, "epochs must be > 0"
         assert self.max_grad_norm > 0, "max_grad_norm must be > 0"
@@ -89,7 +91,6 @@ class TrainingConfig:
         count = float(self.n_gpus * self.n_nodes * self.batch_size)
         self.log_every = int(ceil(self.log_every / count))
         self.checkpoint_every = int(ceil(self.checkpoint_every / count))
-
 
     def set_id(self, run_id: str) -> None:
         """Set run ID (for logging) after initialization."""

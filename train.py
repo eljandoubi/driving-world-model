@@ -79,7 +79,9 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                 continue  # only create video dataloaders for validation and test sets
             if prefix == "video":
                 batch_size = 1
-                buffer_size = config.buffer_size// 10  # use smaller buffer size for video dataloaders to reduce memory usage
+                buffer_size = (
+                    config.buffer_size // 10
+                )  # use smaller buffer size for video dataloaders to reduce memory usage
             else:
                 batch_size = config.batch_size
                 if k != "train":
@@ -87,13 +89,13 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                 buffer_size = config.buffer_size
             key = f"{prefix}_{k}" if prefix else k
             dataloaders[key] = StreamDataset(
-                    split=k,
-                    im_s=config.image_size,
-                    rank=global_rank,
-                    world_size=world_size,
-                    batch_size=batch_size,
-                    pin_memory=config.pin_memory,
-                    buffer_size=buffer_size,
+                split=k,
+                im_s=config.image_size,
+                rank=global_rank,
+                world_size=world_size,
+                batch_size=batch_size,
+                pin_memory=config.pin_memory,
+                buffer_size=buffer_size,
             )
 
     raw_model = WorldModel(
@@ -128,7 +130,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         best_val_loss = float("inf")
         start_iteration = 0
 
-    total=len(dataloaders["train"])
+    total = len(dataloaders["train"])
     disable_tqdm = not is_main
 
     model.train()
@@ -152,9 +154,9 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             step = epoch * total + i
             optimizer.zero_grad(set_to_none=True)
             batch = batch.to(device, non_blocking=True)
-            pred_delta  = model(batch["a_t"], batch["x_t"])
+            pred_delta = model(batch["a_t"], batch["x_t"])
             target_delta = batch["x_tp1"] - batch["x_t"]
-            loss = loss_fn(pred_delta , target_delta)
+            loss = loss_fn(pred_delta, target_delta)
             loss.backward()
             clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
             optimizer.step()

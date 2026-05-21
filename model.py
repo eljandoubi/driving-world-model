@@ -53,12 +53,13 @@ class WorldModel(nn.Module):
         )
 
         scheduler = DDPMScheduler.from_pretrained(
-            "runwayml/stable-diffusion-v1-5",
-            subfolder="scheduler"
+            "runwayml/stable-diffusion-v1-5", subfolder="scheduler"
         )
         self.num_timesteps = scheduler.config.num_train_timesteps  # pyright: ignore[reportAttributeAccessIssue]
 
-    def forward(self, a_t: torch.Tensor, x_t: torch.Tensor, t: torch.Tensor | None = None):
+    def forward(
+        self, a_t: torch.Tensor, x_t: torch.Tensor, t: torch.Tensor | None = None
+    ):
         cond = self.action_embedder(a_t)  # (B, tokens, dim)
         B = x_t.shape[0]
         if t is None:
@@ -66,8 +67,8 @@ class WorldModel(nn.Module):
                 t = torch.randint(0, self.num_timesteps, (B,), device=x_t.device)
             else:
                 t = torch.zeros((B,), dtype=torch.long, device=x_t.device)
-        
-        pred_delta  = self.unet(
+
+        pred_delta = self.unet(
             sample=x_t, timestep=t, encoder_hidden_states=cond
         ).sample
-        return pred_delta 
+        return pred_delta
