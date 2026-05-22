@@ -127,17 +127,16 @@ def main(local_rank: int, config: TrainingConfig) -> None:
     if config.resume:
         if is_main:
             logger.info(f"Resuming from checkpoint {config.resume}...")
-        start_epoch, start_iteration, best_val_loss = load_checkpoint(
-            config.resume, raw_model, optimizer, scheduler, device, early_stopping
+        start_epoch, best_val_loss = load_checkpoint(
+            config.resume, raw_model, optimizer, scheduler, device, early_stopping, dataloaders["train"]
         )
         if is_main:
             logger.info(
-                f"Resumed from epoch {start_epoch}, iteration {start_iteration}"
+                f"Resumed from epoch {start_epoch}"
             )
     else:
         start_epoch = 0
         best_val_loss = float("inf")
-        start_iteration = 0
 
     disable_tqdm = not is_main
 
@@ -156,10 +155,9 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             desc=f"epoch {epoch}",
             total=total,
             disable=disable_tqdm,
+            initial=dataloaders["train"].initial_step,
         )
         for i, batch in pbar:
-            if epoch == start_epoch and i < start_iteration:
-                continue  # skip already trained iterations when resuming
             step = epoch * total + i
             optimizer.zero_grad(set_to_none=True)
             batch = batch.to(device, non_blocking=True)
@@ -207,8 +205,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         optimizer,
                         scheduler,
                         early_stopping,
+                        dataset=dataloaders["train"],
                         epoch=epoch,
-                        iteration=i,
                         best_val_loss=best_val_loss,
                     )
                     wandb.save(str(ckpt_path), base_path=str(config.run_dir))
@@ -236,8 +234,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                             optimizer,
                             scheduler,
                             early_stopping,
+                            dataset=dataloaders["train"],
                             epoch=epoch,
-                            iteration=i,
                             best_val_loss=best_val_loss,
                         )
                         wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
@@ -299,8 +297,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             optimizer,
             scheduler,
             early_stopping,
+            dataset=dataloaders["train"],
             epoch=epoch,
-            iteration=i,
             best_val_loss=best_val_loss,
         )
         wandb.save(str(final_ckpt_path), base_path=str(config.run_dir))

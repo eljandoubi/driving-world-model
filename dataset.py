@@ -48,6 +48,7 @@ class StreamDataset:
         len = self.main_stream.info.splits[split].num_examples  # pyright: ignore[reportOptionalSubscript]
         self._len_estimated = int(ceil(len / float(world_size * batch_size)))
         self._len = None
+        self._counter = 0
         self.batch_size = batch_size
         self.buffer_size = buffer_size
         self.pin_memory = pin_memory
@@ -69,6 +70,10 @@ class StreamDataset:
             self.stream = self.stream.shard(num_shards=self.world_size, index=self.rank)
 
         return self
+    
+    @property
+    def initial_step(self):
+        return self._counter//self.batch_size
 
     def _pick(self, sample: dict):
         data = TensorDict()
@@ -83,9 +88,12 @@ class StreamDataset:
         return data, meta
 
     def _generate_samples(self):
-        count = 0
         run_id = ""
-        for it in self.stream:
+        if self._counter > 0:
+            self.logger.warning(f"Resuming stream from step {self.initial_step} (counter={self._counter}) for rank {self.rank}...")
+        for i,it in enumerate(self.stream):
+            if i < self._counter:
+                continue
             data, meta = self._pick(it)
             if run_id != meta["run_id"]:
                 run_id = meta["run_id"]
@@ -95,13 +103,15 @@ class StreamDataset:
             assert idx < meta["frame"]
             idx = meta["frame"]
             current_data["x_tp1"] = data["x_t"]
-            count += 1
+            self._counter += 1
             yield current_data
             current_data = data
 
         if self._len is None:
-            self._len = count // self.batch_size
+            self._len = self._counter // self.batch_size
             self.logger.info(f"Estimated dataset length: {self._len}")
+
+        self._counter = 0
 
     def __len__(self):
         if self._len is None:
@@ -146,3 +156,34 @@ class StreamDataset:
             if item is stop_token:
                 break
             yield item
+
+    def state_dict(self) -> dict:
+        return {"counter": self._counter, "len": self._len, 
+                "rank": self.rank, "world_size": self.world_size, 
+                "batch_size": self.batch_size}
+    
+    def load_state_dict(self, state_dict: dict) -> None:
+        assert state_dict["rank"] == self.rank, f"Rank mismatch: checkpoint rank {state_dict['rank']} vs current rank {self.rank}"
+        assert state_dict["world_size"] == self.world_size, f"World size mismatch: checkpoint world size {state_dict['world_size']} vs current world size {self.world_size}"
+        assert state_dict["batch_size"] == self.batch_size, f"Batch size mismatch: checkpoint batch size {state_dict['batch_size']} vs current batch size {self.batch_size}"
+        self._counter = state_dict["counter"]
+        self._len = state_dict["len"]
+
+if __name__ == "__main__":
+    from tqdm import tqdm
+    kwargs = dict(batch_size=4, rank=0, world_size=128)
+    dataset = StreamDataset(**kwargs) # pyright: ignore[reportArgumentType]
+    for _ in tqdm(dataset.reset_stream(), total=len(dataset), desc="Testing StreamDataset"):
+        pass
+
+    print("Testing state_dict and load_state_dict...")
+    for i,_ in tqdm(enumerate(dataset.reset_stream(), start=1), total=len(dataset), desc="Testing state_dict and load_state_dict"):
+        if i == 100:
+            state = dataset.state_dict()
+            break
+    print("restarting dataset and loading state...")
+    new_dataset = StreamDataset(**kwargs) # pyright: ignore[reportArgumentType]
+    new_dataset.load_state_dict(state)
+    for _ in tqdm(new_dataset.reset_stream(), total=len(new_dataset), desc="Testing loaded state", initial=new_dataset.initial_step):
+        pass
+     
