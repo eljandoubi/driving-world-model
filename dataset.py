@@ -109,12 +109,13 @@ class StreamDataset:
 
         if self._len is None:
             self._len = self._counter // self.batch_size
-            self.logger.info(f"Estimated dataset length: {self._len}")
+            self.logger.info(f"Computed dataset length: {self._len}")
 
         self._counter = 0
 
     def __len__(self):
         if self._len is None:
+            self.logger.warning(f"Length of dataset not known yet; returning estimated length {self._len_estimated}")
             return self._len_estimated
         return self._len
 
@@ -168,22 +169,4 @@ class StreamDataset:
         assert state_dict["batch_size"] == self.batch_size, f"Batch size mismatch: checkpoint batch size {state_dict['batch_size']} vs current batch size {self.batch_size}"
         self._counter = state_dict["counter"]
         self._len = state_dict["len"]
-
-if __name__ == "__main__":
-    from tqdm import tqdm
-    kwargs = dict(batch_size=4, rank=0, world_size=128)
-    dataset = StreamDataset(**kwargs) # pyright: ignore[reportArgumentType]
-    for _ in tqdm(dataset.reset_stream(), total=len(dataset), desc="Testing StreamDataset"):
-        pass
-
-    print("Testing state_dict and load_state_dict...")
-    for i,_ in tqdm(enumerate(dataset.reset_stream(), start=1), total=len(dataset), desc="Testing state_dict and load_state_dict"):
-        if i == 100:
-            state = dataset.state_dict()
-            break
-    print("restarting dataset and loading state...")
-    new_dataset = StreamDataset(**kwargs) # pyright: ignore[reportArgumentType]
-    new_dataset.load_state_dict(state)
-    for _ in tqdm(new_dataset.reset_stream(), total=len(new_dataset), desc="Testing loaded state", initial=new_dataset.initial_step):
-        pass
      

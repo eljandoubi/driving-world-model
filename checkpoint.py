@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 
 from dataset import StreamDataset
 from early_stopping import EarlyStopping
@@ -17,21 +18,32 @@ def save_checkpoint(
     dataset: StreamDataset,
     epoch: int,
     best_val_loss: float,
+    rank: int = 0,
+    world_size: int = 1,
 ) -> None:
     """Save training checkpoint."""
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    data = {
-        "epoch": epoch,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "scheduler_state_dict": scheduler.state_dict()
-        if scheduler is not None
-        else None,
-        "early_stopping_state_dict": early_stopping.state_dict(),
-        "best_val_loss": best_val_loss,
-        "dataset_state_dict": dataset.state_dict(),
-    }
-    torch.save(data, path)
+    if world_size > 1:
+        dist.barrier()  # Ensure all processes have finished the epoch before saving
+        local_dataset_state = dataset.state_dict()
+        gathered_dataset_states = [{} for _ in range(world_size)]
+        dist.all_gather_object(gathered_dataset_states, local_dataset_state)
+    else:
+        gathered_dataset_states = [dataset.state_dict()]
+
+    if rank == 0:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict()
+            if scheduler is not None
+            else None,
+            "early_stopping_state_dict": early_stopping.state_dict(),
+            "best_val_loss": best_val_loss,
+            "dataset_state_dict": gathered_dataset_states,
+        }
+        torch.save(data, path)
 
 
 def load_checkpoint(
@@ -42,6 +54,7 @@ def load_checkpoint(
     device: torch.device,
     early_stopping: EarlyStopping,
     dataset: StreamDataset,
+    rank: int = 0,
 ) -> tuple[int, float]:
     """Load training checkpoint. Returns start_epoch and best_val_loss."""
     ckpt = torch.load(path, map_location=device, weights_only=True)
@@ -50,7 +63,7 @@ def load_checkpoint(
     if scheduler is not None and ckpt["scheduler_state_dict"] is not None:
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
     early_stopping.load_state_dict(ckpt["early_stopping_state_dict"])
-    dataset.load_state_dict(ckpt["dataset_state_dict"])
+    dataset.load_state_dict(ckpt["dataset_state_dict"][rank])
     return (
         ckpt["epoch"],
         ckpt["best_val_loss"],

@@ -94,6 +94,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                     batch_size *= 4  # use larger batch size for validation and test to speed up evaluation
                 buffer_size = config.buffer_size
             key = f"{prefix}_{k}" if prefix else k
+
             dataloaders[key] = StreamDataset(
                 split=k,
                 im_s=config.image_size,
@@ -119,16 +120,16 @@ def main(local_rank: int, config: TrainingConfig) -> None:
     scheduler = CosineAnnealingWarmRestarts(
         optimizer, T_0=config.scheduler_t0, T_mult=config.scheduler_t_mult
     )
-    if is_main:
-        early_stopping = EarlyStopping(
-            patience=config.patience, min_delta=config.min_delta
-        )
+
+    early_stopping = EarlyStopping(
+        patience=config.patience, min_delta=config.min_delta
+    )
 
     if config.resume:
         if is_main:
             logger.info(f"Resuming from checkpoint {config.resume}...")
         start_epoch, best_val_loss = load_checkpoint(
-            config.resume, raw_model, optimizer, scheduler, device, early_stopping, dataloaders["train"]
+            config.resume, raw_model, optimizer, scheduler, device, early_stopping, dataloaders["train"], global_rank
         )
         if is_main:
             logger.info(
@@ -138,25 +139,27 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         start_epoch = 0
         best_val_loss = float("inf")
 
-    disable_tqdm = not is_main
+    
 
     model.train()
+    avg_loss = 0.0
     stopped = False
     if world_size > 1:
         stopped_tensor = torch.tensor([0], device=device)
-    avg_loss = 0.0
+    
     for epoch in tqdm(
-        range(start_epoch, config.epochs), desc="training epochs", disable=disable_tqdm
+        range(start_epoch, config.epochs), desc="training epochs", disable=not is_main
     ):
         cum_loss = 0.0
         total = len(dataloaders["train"])
         pbar = tqdm(
             enumerate(dataloaders["train"].reset_stream(), start=1),
-            desc=f"epoch {epoch}",
+            desc=f"epoch {epoch} training rank {global_rank}",
             total=total,
-            disable=disable_tqdm,
+            disable=not is_main,
             initial=dataloaders["train"].initial_step,
         )
+
         for i, batch in pbar:
             step = epoch * total + i
             optimizer.zero_grad(set_to_none=True)
@@ -167,6 +170,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             loss.backward()
             clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
             optimizer.step()
+
             if is_main:
                 loss_value = loss.item()
                 cum_loss += loss_value
@@ -184,31 +188,40 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         step=step,
                     )
                     avg_loss = 0.0
+
             if step % config.checkpoint_every == 0:
                 gc.collect()  # collect garbage before validation to free up memory
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
+                
+
                 val_loss = validate_model(
                     model,
                     dataloaders["validation"].reset_stream(),
                     device,
                     loss_fn,
                     world_size,
-                    disable_tqdm=disable_tqdm,  # show tqdm for validation only on main process
+                    is_main,
                 )
+
                 if is_main:
                     pbar.set_postfix(val_loss=val_loss)
                     wandb.log({"validation/loss": val_loss}, step=step)
-                    ckpt_path = config.checkpoint_dir / f"checkpoint_step_{step}.pt"
-                    save_checkpoint(
-                        ckpt_path,
-                        raw_model,
-                        optimizer,
-                        scheduler,
-                        early_stopping,
-                        dataset=dataloaders["train"],
-                        epoch=epoch,
-                        best_val_loss=best_val_loss,
-                    )
+
+                ckpt_path = config.checkpoint_dir / f"checkpoint_step_{step}.pt"
+                save_checkpoint(
+                    ckpt_path,
+                    raw_model,
+                    optimizer,
+                    scheduler,
+                    early_stopping,
+                    dataset=dataloaders["train"],
+                    epoch=epoch,
+                    best_val_loss=best_val_loss,
+                    rank=global_rank,
+                    world_size=world_size,
+                )
+
+                if is_main:
                     wandb.save(str(ckpt_path), base_path=str(config.run_dir))
                     video_path = plot_video(
                         raw_model,
@@ -225,19 +238,23 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         step=step,
                     )
 
-                    if val_loss < best_val_loss:
-                        best_val_loss = val_loss
-                        best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
-                        save_checkpoint(
-                            best_ckpt_path,
-                            raw_model,
-                            optimizer,
-                            scheduler,
-                            early_stopping,
-                            dataset=dataloaders["train"],
-                            epoch=epoch,
-                            best_val_loss=best_val_loss,
-                        )
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
+                    save_checkpoint(
+                        best_ckpt_path,
+                        raw_model,
+                        optimizer,
+                        scheduler,
+                        early_stopping,
+                        dataset=dataloaders["train"],
+                        epoch=epoch,
+                        best_val_loss=best_val_loss,
+                        rank=global_rank,
+                        world_size=world_size,
+                    )
+
+                    if is_main:
                         wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
                         best_video_path = plot_video(
                             raw_model,
@@ -254,20 +271,22 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                             step=step,
                         )
 
-                    if early_stopping.step(val_loss):
-                        if is_main:
-                            logger.info(
-                                f"Early stopping at step {step} with validation loss {val_loss:.4f}"
-                            )
-                        stopped = True
-                    # Propagate stopped flag to all workers
-                    if world_size > 1:
-                        if is_main:
-                            stopped_tensor[0] = int(stopped)
-                        dist.broadcast(stopped_tensor, src=0)
-                        stopped = bool(stopped_tensor.item())
-                    if stopped:
-                        break
+                if early_stopping.step(val_loss):
+                    if is_main:
+                        logger.info(
+                            f"Early stopping at step {step} with validation loss {val_loss:.4f}"
+                        )
+                    stopped = True
+
+                # Propagate stopped flag to all workers
+                if world_size > 1:
+                    if is_main:
+                        stopped_tensor[0] = int(stopped)
+                    dist.broadcast(stopped_tensor, src=0)
+                    stopped = bool(stopped_tensor.item())
+
+                if stopped:
+                    break
 
                 if world_size > 1:
                     dist.barrier()
@@ -287,21 +306,28 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         device,
         loss_fn,
         world_size,
-        disable_tqdm=disable_tqdm,
+        is_main=is_main,
+    )
+    logger.info("final test loss %f", test_loss)
+    final_ckpt_path = config.checkpoint_dir / "final_checkpoint.pt"
+
+    if is_main:
+        wandb.log({"test/loss": test_loss})
+        wandb.save(str(final_ckpt_path), base_path=str(config.run_dir))
+
+    save_checkpoint(
+        final_ckpt_path,
+        raw_model,
+        optimizer,
+        scheduler,
+        early_stopping,
+        dataset=dataloaders["train"],
+        epoch=epoch,
+        best_val_loss=best_val_loss,
+        rank=global_rank,
+        world_size=world_size,
     )
     if is_main:
-        final_ckpt_path = config.checkpoint_dir / "final_checkpoint.pt"
-        save_checkpoint(
-            final_ckpt_path,
-            raw_model,
-            optimizer,
-            scheduler,
-            early_stopping,
-            dataset=dataloaders["train"],
-            epoch=epoch,
-            best_val_loss=best_val_loss,
-        )
-        wandb.save(str(final_ckpt_path), base_path=str(config.run_dir))
         final_video_path = plot_video(
             raw_model,
             dataloaders["video_test"].reset_stream(),
@@ -315,10 +341,10 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                 )
             },
         )
-        logger.info("final test loss %f", test_loss)
-        wandb.log({"test/loss": test_loss})
+        
         wandb.finish()
-        logger.info("Training complete.")
+    
+    logger.info("Training complete.")
 
     if world_size > 1:
         cleanup_ddp()
