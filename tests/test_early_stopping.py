@@ -1,5 +1,7 @@
 """Tests for early stopping."""
 
+import logging
+
 import pytest
 
 from early_stopping import EarlyStopping
@@ -58,19 +60,20 @@ def test_state_dict_roundtrip():
     assert es2.best_loss == es.best_loss
 
 
-def test_load_state_dict_patience_mismatch():
+def test_load_state_dict_patience_mismatch(caplog):
     es = EarlyStopping(patience=5, min_delta=0.01)
     es.step(0.5)
     state = es.state_dict()
 
     es2 = EarlyStopping(patience=3, min_delta=0.01)
-    with pytest.raises(AssertionError):
+    with caplog.at_level(logging.WARNING):
         es2.load_state_dict(state)
+    assert "patience changed" in caplog.text
+    assert es2.best_loss == 0.5
 
 
 def test_first_step_never_stops():
     es = EarlyStopping(patience=1, min_delta=0.0)
-    # First step should always set best and not stop
     assert not es.step(999.0)
 
 

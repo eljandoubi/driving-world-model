@@ -13,7 +13,7 @@ class TqdmLoggingHandler(logging.Handler):
 
 
 def setup_logging(rank: int = 0):
-    # ✅ Inject rank into ALL log records globally
+    # Inject rank into ALL log records globally
     old_factory = logging.getLogRecordFactory()
 
     def record_factory(*args, **kwargs):
@@ -38,7 +38,7 @@ def setup_logging(rank: int = 0):
         logger.addHandler(console)
         logger.setLevel(logging.INFO)
 
-    # 🔇 Silence noisy libs
+    # Silence noisy libs
     for name in ["httpx", "urllib3", "huggingface_hub"]:
         logging.getLogger(name).setLevel(logging.ERROR)
 

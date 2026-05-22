@@ -1,7 +1,7 @@
 [project]
 name = "driving-world-model"
 version = "0.1.0"
-description = "Add your description here"
+description = "A world model for autonomous driving: next-frame prediction conditioned on actions via a Stable Diffusion UNet"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

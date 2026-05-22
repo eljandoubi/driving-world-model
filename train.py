@@ -76,7 +76,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             allow_val_change=True,
         )
 
-    loss_fn = LOSS_FN_MAP.get(config.loss_type, mse_loss)
+    loss_fn = LOSS_FN_MAP[config.loss_type]
 
     dataloaders = {}
     for k in ["train", "validation", "test"]:
@@ -109,6 +109,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         base_name=config.base_name,
         num_tokens=config.num_tokens,
         hidden_dim=config.hidden_dim,
+        activation=config.activation,
+        dropout=config.dropout,
     ).to(device, non_blocking=True)
 
     if world_size > 1:

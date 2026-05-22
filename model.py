@@ -40,6 +40,8 @@ class WorldModel(nn.Module):
         action_dim: int = 3,
         num_tokens: int = 4,
         hidden_dim: int = 1024,
+        activation: str = "swiglu",
+        dropout: float = 0.0,
     ):
 
         super().__init__()
@@ -50,6 +52,8 @@ class WorldModel(nn.Module):
             embed_dim=self.unet.config.cross_attention_dim,  # pyright: ignore[reportAttributeAccessIssue]
             num_tokens=num_tokens,
             hidden_dim=hidden_dim,
+            act_fn=activation,
+            dropout=dropout,
         )
 
         scheduler = DDPMScheduler.from_pretrained(

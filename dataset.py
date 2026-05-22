@@ -45,8 +45,8 @@ class StreamDataset:
         self.rank = rank
         self.world_size = world_size
         self.main_stream = load_dataset(name, split=split, streaming=True).reshard()
-        len = self.main_stream.info.splits[split].num_examples  # pyright: ignore[reportOptionalSubscript]
-        self._len_estimated = int(ceil(len / float(world_size * batch_size)))
+        num_examples = self.main_stream.info.splits[split].num_examples  # pyright: ignore[reportOptionalSubscript]
+        self._len_estimated = int(ceil(num_examples / float(world_size * batch_size)))
         self._len = None
         self._counter = 0
         self.batch_size = batch_size
@@ -169,4 +169,3 @@ class StreamDataset:
         assert state_dict["batch_size"] == self.batch_size, f"Batch size mismatch: checkpoint batch size {state_dict['batch_size']} vs current batch size {self.batch_size}"
         self._counter = state_dict["counter"]
         self._len = state_dict["len"]
-     

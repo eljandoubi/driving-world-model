@@ -12,7 +12,7 @@ World models enable planning and simulation without interacting with the real en
 |-----------|-------------|
 | **WorldModel** | Pretrained Stable Diffusion UNet conditioned on actions via cross-attention |
 | **ActionEmbedder** | Feed-forward network (SwiGLU) projecting $\mathbb{R}^3 \to \mathbb{R}^{T \times D}$ multi-token embeddings |
-| **Loss** | MSE between predicted and ground-truth next frame |
+| **Loss** | L1 (default) or L2 between predicted and ground-truth residual frame |
 
 The UNet backbone is loaded from `runwayml/stable-diffusion-v1-5` (configurable). Actions are embedded into `num_tokens` vectors of dimension `cross_attention_dim` and injected as the encoder hidden states.
 
@@ -94,10 +94,11 @@ torchrun --nproc_per_node=4 --nnodes=2 --node_rank=1 \
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `base_name` | `runwayml/stable-diffusion-v1-5` | Pretrained UNet backbone |
-| `num_tokens` | `8` | Number of action embedding tokens |
-| `hidden_dim` | `1024` | Action embedder hidden dimension |
+| `num_tokens` | `16` | Number of action embedding tokens |
+| `hidden_dim` | `2048` | Action embedder hidden dimension |
 | `activation` | `swiglu` | Activation in action embedder (`gelu`, `geglu`, `swiglu`, etc.) |
-| `dropout` | `0.1` | Dropout in action embedder |
+| `loss_type` | `l1` | Loss function (`l1` or `l2`) |
+| `dropout` | `0.0` | Dropout in action embedder |
 
 ### Optimization
 
@@ -131,9 +132,8 @@ torchrun --nproc_per_node=4 --nnodes=2 --node_rank=1 \
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `image_size` | `256` | Input image resize resolution |
-| `batch_size` | `8` | Training batch size (per GPU) |
-| `num_workers` | `8` | DataLoader workers |
-| `persistent_workers` | `True` | Keep workers alive between epochs |
+| `batch_size` | `2` | Training batch size (per GPU) |
+| `buffer_size` | `1000` | Prefetch buffer size for streaming dataset |
 | `pin_memory` | `True` | Pin memory for GPU transfer |
 
 ### Paths
@@ -176,6 +176,8 @@ uv run pytest tests/ -v
 ├── config.py           # TrainingConfig dataclass (all hyperparameters)
 ├── checkpoint.py       # Save/load checkpoints
 ├── early_stopping.py   # EarlyStopping utility
+├── logger.py           # Rank-aware logging with tqdm integration
+├── plot.py             # Video generation for prediction visualization
 ├── tests/              # Unit tests
 └── pyproject.toml      # Dependencies & config
 ```

@@ -30,10 +30,11 @@ class EarlyStopping:
         self.counter += 1
         return self.counter >= self.patience
 
-    def reset(self) -> None:
+    def reset(self, only_counter: bool = True) -> None:
         """Reset the early stopping state."""
         self.counter = 0
-        self.best_loss = None
+        if not only_counter:
+            self.best_loss = None
 
     def load_state_dict(self, state_dict: dict) -> None:
         """Load the early stopping state."""
