@@ -42,6 +42,7 @@ def cleanup_ddp() -> None:
 def main(local_rank: int, config: TrainingConfig) -> None:
     world_size = config.n_gpus * config.n_nodes
     global_rank = config.node_rank * config.n_gpus + local_rank
+    print("local_rank",local_rank,"global_rank",global_rank)
     is_main = global_rank == 0
 
     if world_size > 1:
