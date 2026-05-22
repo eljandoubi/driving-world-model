@@ -123,32 +123,33 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         optimizer, T_0=config.scheduler_t0, T_mult=config.scheduler_t_mult
     )
 
-    early_stopping = EarlyStopping(
-        patience=config.patience, min_delta=config.min_delta
-    )
+    early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
 
     if config.resume:
         if is_main:
             logger.info(f"Resuming from checkpoint {config.resume}...")
         start_epoch, best_val_loss = load_checkpoint(
-            config.resume, raw_model, optimizer, scheduler, device, early_stopping, dataloaders["train"], global_rank
+            config.resume,
+            raw_model,
+            optimizer,
+            scheduler,
+            device,
+            early_stopping,
+            dataloaders["train"],
+            global_rank,
         )
         if is_main:
-            logger.info(
-                f"Resumed from epoch {start_epoch}"
-            )
+            logger.info(f"Resumed from epoch {start_epoch}")
     else:
         start_epoch = 0
         best_val_loss = float("inf")
-
-    
 
     model.train()
     avg_loss = 0.0
     stopped = False
     if world_size > 1:
         stopped_tensor = torch.tensor([0], device=device)
-    
+
     for epoch in tqdm(
         range(start_epoch, config.epochs), desc="training epochs", disable=not is_main
     ):
@@ -194,7 +195,6 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             if step % config.checkpoint_every == 0:
                 gc.collect()  # collect garbage before validation to free up memory
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
-                
 
                 val_loss = validate_model(
                     model,
@@ -343,9 +343,9 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                 )
             },
         )
-        
+
         wandb.finish()
-    
+
     logger.info("Training complete.")
 
     if world_size > 1:

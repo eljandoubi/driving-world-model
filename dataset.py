@@ -66,14 +66,16 @@ class StreamDataset:
         self.logger.info(f"Resetting stream for rank {self.rank}...")
         self.stream = deepcopy(self.main_stream)
         if self.world_size > 1:
-            self.logger.info(f"Sharding dataset across {self.world_size} processes..., rank {self.rank}")
+            self.logger.info(
+                f"Sharding dataset across {self.world_size} processes..., rank {self.rank}"
+            )
             self.stream = self.stream.shard(num_shards=self.world_size, index=self.rank)
 
         return self
-    
+
     @property
     def initial_step(self):
-        return self._counter//self.batch_size
+        return self._counter // self.batch_size
 
     def _pick(self, sample: dict):
         data = TensorDict()
@@ -90,8 +92,10 @@ class StreamDataset:
     def _generate_samples(self):
         run_id = ""
         if self._counter > 0:
-            self.logger.warning(f"Resuming stream from step {self.initial_step} (counter={self._counter}) for rank {self.rank}...")
-        for i,it in enumerate(self.stream):
+            self.logger.warning(
+                f"Resuming stream from step {self.initial_step} (counter={self._counter}) for rank {self.rank}..."
+            )
+        for i, it in enumerate(self.stream):
             if i < self._counter:
                 continue
             data, meta = self._pick(it)
@@ -115,7 +119,9 @@ class StreamDataset:
 
     def __len__(self):
         if self._len is None:
-            self.logger.warning(f"Length of dataset not known yet; returning estimated length {self._len_estimated}")
+            self.logger.warning(
+                f"Length of dataset not known yet; returning estimated length {self._len_estimated}"
+            )
             return self._len_estimated
         return self._len
 
@@ -159,13 +165,23 @@ class StreamDataset:
             yield item
 
     def state_dict(self) -> dict:
-        return {"counter": self._counter, "len": self._len, 
-                "rank": self.rank, "world_size": self.world_size, 
-                "batch_size": self.batch_size}
-    
+        return {
+            "counter": self._counter,
+            "len": self._len,
+            "rank": self.rank,
+            "world_size": self.world_size,
+            "batch_size": self.batch_size,
+        }
+
     def load_state_dict(self, state_dict: dict) -> None:
-        assert state_dict["rank"] == self.rank, f"Rank mismatch: checkpoint rank {state_dict['rank']} vs current rank {self.rank}"
-        assert state_dict["world_size"] == self.world_size, f"World size mismatch: checkpoint world size {state_dict['world_size']} vs current world size {self.world_size}"
-        assert state_dict["batch_size"] == self.batch_size, f"Batch size mismatch: checkpoint batch size {state_dict['batch_size']} vs current batch size {self.batch_size}"
+        assert state_dict["rank"] == self.rank, (
+            f"Rank mismatch: checkpoint rank {state_dict['rank']} vs current rank {self.rank}"
+        )
+        assert state_dict["world_size"] == self.world_size, (
+            f"World size mismatch: checkpoint world size {state_dict['world_size']} vs current world size {self.world_size}"
+        )
+        assert state_dict["batch_size"] == self.batch_size, (
+            f"Batch size mismatch: checkpoint batch size {state_dict['batch_size']} vs current batch size {self.batch_size}"
+        )
         self._counter = state_dict["counter"]
         self._len = state_dict["len"]
