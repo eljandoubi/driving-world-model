@@ -39,11 +39,11 @@ def plot_video(
     data_iter = iter(dataloader)
     data = next(data_iter)
 
-    x = data["x_t"].unsqueeze(0).to(device)
+    x = data["x_t"].squeeze(0).to(device)
 
     frames: list[tuple[torch.Tensor, torch.Tensor]] = []
     for _ in tqdm(range(num_frames), desc="Generating video frames"):
-        a_t = data["a_t"].unsqueeze(0).to(device)
+        a_t = data["a_t"].squeeze(0).to(device)
         for t in range(num_timesteps, -time_step, -time_step):
             pred_delta = model(a_t, x, t)
             x = x + pred_delta
