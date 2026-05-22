@@ -115,7 +115,9 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         optimizer, T_0=config.scheduler_t0, T_mult=config.scheduler_t_mult
     )
     if is_main:
-        early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
+        early_stopping = EarlyStopping(
+            patience=config.patience, min_delta=config.min_delta
+        )
 
     if config.resume:
         if is_main:
@@ -212,11 +214,14 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         device=device,
                     )
                     wandb.log(
-                        {"video/prediction": wandb.Video(str(video_path), format="mp4")},
+                        {
+                            "video/prediction": wandb.Video(
+                                str(video_path), format="mp4"
+                            )
+                        },
                         step=step,
                     )
 
-                  
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss
                         best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
@@ -240,13 +245,11 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         wandb.log(
                             {
                                 "video/best_prediction": wandb.Video(
-                                    str(best_video_path),
-                                    format="mp4"
+                                    str(best_video_path), format="mp4"
                                 )
                             },
                             step=step,
                         )
-
 
                     if early_stopping.step(val_loss):
                         if is_main:
@@ -303,7 +306,11 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             device=device,
         )
         wandb.log(
-            {"video/final_prediction": wandb.Video(str(final_video_path), format="mp4")},
+            {
+                "video/final_prediction": wandb.Video(
+                    str(final_video_path), format="mp4"
+                )
+            },
         )
         logger.info("final test loss %f", test_loss)
         wandb.log({"test/loss": test_loss})
