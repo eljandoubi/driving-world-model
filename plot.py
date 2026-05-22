@@ -14,6 +14,7 @@ STD = torch.tensor([0.2823, 0.2809, 0.2801, 1e-8])
 
 def _denormalize(tensor: torch.Tensor) -> torch.Tensor:
     """(C, H, W) normalized tensor -> (H, W, 3) RGB clipped to [0, 1]."""
+    tensor = tensor.squeeze(0).cpu()
     img = tensor * STD[:, None, None] + MEAN[:, None, None]
     return img[:3].clamp(0, 1).permute(1, 2, 0).cpu()
 
@@ -30,7 +31,7 @@ def plot_video(
     num_timesteps: int = 1000,
 ) -> Path:
     model.eval()
-
+    assert dataloader.batch_size == 1, "plot_video only supports batch_size=1 for now"
     fig, (ax_gt, ax_pred) = plt.subplots(1, 2, figsize=(8, 4))
     ax_gt.set_axis_off()
     ax_pred.set_axis_off()
@@ -39,17 +40,17 @@ def plot_video(
     data_iter = iter(dataloader)
     data = next(data_iter)
 
-    x = data["x_t"].squeeze(0).to(device)
+    x = data["x_t"].to(device)
 
     frames: list[tuple[torch.Tensor, torch.Tensor]] = []
     for _ in tqdm(range(num_frames), desc="Generating video frames"):
-        a_t = data["a_t"].squeeze(0).to(device)
+        a_t = data["a_t"].to(device)
         for t in range(num_timesteps, -time_step, -time_step):
             pred_delta = model(a_t, x, t)
             x = x + pred_delta
 
         gt_img = _denormalize(data["x_tp1"])
-        pred_img = _denormalize(x.squeeze(0))
+        pred_img = _denormalize(x)
         frames.append((gt_img, pred_img))
 
         try:

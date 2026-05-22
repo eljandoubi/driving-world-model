@@ -16,13 +16,14 @@ from transformers import HfArgumentParser
 from checkpoint import load_checkpoint, save_checkpoint
 from config import TrainingConfig
 from dataset import StreamDataset
-from early_stopping import EarlyStopping, logger
+from early_stopping import EarlyStopping
+from logger import setup_logging
 from model import WorldModel
 from plot import plot_video
 from validate import tqdm, validate_model
 
 os.environ["WANDB_DISABLE_SYMLINKS"] = "true"
-logger.info("Loading environment variables...", load_dotenv())
+load_dotenv()
 
 LOSS_FN_MAP = {"l2": mse_loss, "l1": l1_loss}
 
@@ -48,6 +49,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         device = torch.device(f"cuda:{local_rank}")
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    logger = setup_logging(rank=global_rank)
 
     logger.info(f"[Rank {global_rank}] using device {device}")
 
@@ -136,7 +139,6 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         best_val_loss = float("inf")
         start_iteration = 0
 
-    total = len(dataloaders["train"])
     disable_tqdm = not is_main
 
     model.train()
@@ -148,8 +150,9 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         range(start_epoch, config.epochs), desc="training epochs", disable=disable_tqdm
     ):
         cum_loss = 0.0
+        total = len(dataloaders["train"])
         pbar = tqdm(
-            enumerate(dataloaders["train"], start=1),
+            enumerate(dataloaders["train"].reset_stream(), start=1),
             desc=f"epoch {epoch}",
             total=total,
             disable=disable_tqdm,
@@ -188,7 +191,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
                 val_loss = validate_model(
                     model,
-                    dataloaders["validation"],
+                    dataloaders["validation"].reset_stream(),
                     device,
                     loss_fn,
                     world_size,
@@ -211,7 +214,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                     wandb.save(str(ckpt_path), base_path=str(config.run_dir))
                     video_path = plot_video(
                         raw_model,
-                        dataloaders["video_validation"],
+                        dataloaders["video_validation"].reset_stream(),
                         save_path=config.plot_dir / f"driving_video_step_{step}.mp4",
                         device=device,
                     )
@@ -240,7 +243,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
                         best_video_path = plot_video(
                             raw_model,
-                            dataloaders["video_test"],
+                            dataloaders["video_test"].reset_stream(),
                             save_path=config.plot_dir / "best_driving_video.mp4",
                             device=device,
                         )
@@ -282,7 +285,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
     torch.cuda.empty_cache()  # clear CUDA cache before validation
     test_loss = validate_model(
         model,
-        dataloaders["test"],
+        dataloaders["test"].reset_stream(),
         device,
         loss_fn,
         world_size,
@@ -303,7 +306,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         wandb.save(str(final_ckpt_path), base_path=str(config.run_dir))
         final_video_path = plot_video(
             raw_model,
-            dataloaders["video_test"],
+            dataloaders["video_test"].reset_stream(),
             save_path=config.plot_dir / "final_driving_video.mp4",
             device=device,
         )

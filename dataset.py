@@ -1,11 +1,14 @@
 import queue
 import threading
+from copy import deepcopy
 from math import ceil
 
 import torch
 from datasets import IterableDataset, load_dataset
 from torchvision import transforms
 from tqdm import tqdm
+
+from logger import setup_logging
 
 
 class TensorDict(dict):
@@ -41,16 +44,14 @@ class StreamDataset:
         super().__init__()
         self.rank = rank
         self.world_size = world_size
-        self.stream = load_dataset(name, split=split, streaming=True).reshard()
-        self._len = self.stream.info.splits[split].num_examples  # pyright: ignore[reportOptionalSubscript]
-        self._len = int(ceil(self._len / float(world_size * batch_size)))
+        self.main_stream = load_dataset(name, split=split, streaming=True).reshard()
+        len = self.main_stream.info.splits[split].num_examples  # pyright: ignore[reportOptionalSubscript]
+        self._len_estimated = int(ceil(len / float(world_size * batch_size)))
+        self._len = None
         self.batch_size = batch_size
         self.buffer_size = buffer_size
         self.pin_memory = pin_memory
-
-        if world_size > 1:
-            print(f"Sharding dataset across {world_size} processes...")
-            self.stream = self.stream.shard(num_shards=world_size, index=rank)
+        self.logger = setup_logging(rank=rank)
 
         self.trans = transforms.Compose(
             [
@@ -59,6 +60,15 @@ class StreamDataset:
                 transforms.Normalize(mean=mean, std=std),
             ]
         )
+
+    def reset_stream(self):
+        self.logger.info(f"Resetting stream for rank {self.rank}...")
+        self.stream = deepcopy(self.main_stream)
+        if self.world_size > 1:
+            self.logger.info(f"Sharding dataset across {self.world_size} processes..., rank {self.rank}")
+            self.stream = self.stream.shard(num_shards=self.world_size, index=self.rank)
+
+        return self
 
     def _pick(self, sample: dict):
         data = TensorDict()
@@ -73,7 +83,7 @@ class StreamDataset:
         return data, meta
 
     def _generate_samples(self):
-
+        count = 0
         run_id = ""
         for it in self.stream:
             data, meta = self._pick(it)
@@ -85,10 +95,17 @@ class StreamDataset:
             assert idx < meta["frame"]
             idx = meta["frame"]
             current_data["x_tp1"] = data["x_t"]
+            count += 1
             yield current_data
             current_data = data
 
+        if self._len is None:
+            self._len = count // self.batch_size
+            self.logger.info(f"Estimated dataset length: {self._len}")
+
     def __len__(self):
+        if self._len is None:
+            return self._len_estimated
         return self._len
 
     def _collate_fn(self, batch: dict[str, list[torch.Tensor]]) -> TensorDict:
