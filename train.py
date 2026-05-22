@@ -21,6 +21,7 @@ from model import WorldModel
 from plot import plot_video
 from validate import tqdm, validate_model
 
+os.environ["WANDB_DISABLE_SYMLINKS"] = "true"
 logger.info("Loading environment variables...", load_dotenv())
 
 
@@ -113,7 +114,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
     scheduler = CosineAnnealingWarmRestarts(
         optimizer, T_0=config.scheduler_t0, T_mult=config.scheduler_t_mult
     )
-    early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
+    if is_main:
+        early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
 
     if config.resume:
         if is_main:
@@ -160,7 +162,6 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             loss.backward()
             clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
             optimizer.step()
-            scheduler.step()
             if is_main:
                 loss_value = loss.item()
                 cum_loss += loss_value
@@ -211,60 +212,66 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         device=device,
                     )
                     wandb.log(
-                        {"video/prediction": wandb.Video(str(video_path), fps=10)},
+                        {"video/prediction": wandb.Video(str(video_path), format="mp4")},
                         step=step,
                     )
+
+                  
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
+                        save_checkpoint(
+                            best_ckpt_path,
+                            raw_model,
+                            optimizer,
+                            scheduler,
+                            early_stopping,
+                            epoch=epoch,
+                            iteration=i,
+                            best_val_loss=best_val_loss,
+                        )
+                        wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
+                        best_video_path = plot_video(
+                            raw_model,
+                            dataloaders["video_test"],
+                            save_path=config.plot_dir / "best_driving_video.mp4",
+                            device=device,
+                        )
+                        wandb.log(
+                            {
+                                "video/best_prediction": wandb.Video(
+                                    str(best_video_path),
+                                    format="mp4"
+                                )
+                            },
+                            step=step,
+                        )
+
+
+                    if early_stopping.step(val_loss):
+                        if is_main:
+                            logger.info(
+                                f"Early stopping at step {step} with validation loss {val_loss:.4f}"
+                            )
+                        stopped = True
+                    # Propagate stopped flag to all workers
+                    if world_size > 1:
+                        if is_main:
+                            stopped_tensor[0] = int(stopped)
+                        dist.broadcast(stopped_tensor, src=0)
+                        stopped = bool(stopped_tensor.item())
+                    if stopped:
+                        break
+
                 if world_size > 1:
                     dist.barrier()
-                model.train()  # set back to train mode after validation
-                if val_loss < best_val_loss and is_main:
-                    best_val_loss = val_loss
-                    best_ckpt_path = config.checkpoint_dir / "best_checkpoint.pt"
-                    save_checkpoint(
-                        best_ckpt_path,
-                        raw_model,
-                        optimizer,
-                        scheduler,
-                        early_stopping,
-                        epoch=epoch,
-                        iteration=i,
-                        best_val_loss=best_val_loss,
-                    )
-                    wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
-                    best_video_path = plot_video(
-                        raw_model,
-                        dataloaders["video_test"],
-                        save_path=config.plot_dir / "best_driving_video.mp4",
-                        device=device,
-                    )
-                    wandb.log(
-                        {
-                            "video/best_prediction": wandb.Video(
-                                str(best_video_path), fps=10
-                            )
-                        },
-                        step=step,
-                    )
-                    if world_size > 1:
-                        dist.barrier()
 
-                if early_stopping.step(val_loss):
-                    if is_main:
-                        logger.info(
-                            f"Early stopping at step {step} with validation loss {val_loss:.4f}"
-                        )
-                    stopped = True
-                # Propagate stopped flag to all workers
-                if world_size > 1:
-                    if is_main:
-                        stopped_tensor[0] = int(stopped)
-                    dist.broadcast(stopped_tensor, src=0)
-                    stopped = bool(stopped_tensor[0].item())
-                if stopped:
-                    break
+                model.train()  # ensure model is in train mode after validation
 
         if stopped:
             break
+
+        scheduler.step()
 
     gc.collect()  # collect garbage before validation to free up memory
     torch.cuda.empty_cache()  # clear CUDA cache before validation
@@ -296,7 +303,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             device=device,
         )
         wandb.log(
-            {"video/final_prediction": wandb.Video(str(final_video_path), fps=10)},
+            {"video/final_prediction": wandb.Video(str(final_video_path), format="mp4")},
         )
         logger.info("final test loss %f", test_loss)
         wandb.log({"test/loss": test_loss})
