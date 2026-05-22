@@ -24,6 +24,8 @@ from validate import tqdm, validate_model
 os.environ["WANDB_DISABLE_SYMLINKS"] = "true"
 logger.info("Loading environment variables...", load_dotenv())
 
+LOSS_FN_MAP = {"l2": mse_loss, "l1": l1_loss}
+
 
 def setup_ddp(local_rank: int, global_rank: int, world_size: int) -> None:
     os.environ.setdefault("MASTER_ADDR", "localhost")
@@ -71,7 +73,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             allow_val_change=True,
         )
 
-    loss_fn = mse_loss if config.loss_type == "l2" else l1_loss
+    loss_fn = LOSS_FN_MAP.get(config.loss_type, mse_loss)
 
     dataloaders = {}
     for k in ["train", "validation", "test"]:
