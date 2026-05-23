@@ -367,13 +367,21 @@ if __name__ == "__main__":
     config = parser.parse_args_into_dataclasses()[0]
 
     if "LOCAL_RANK" in os.environ:
+        print("run with torchrun")
         # Launched via torchrun — env vars override config
         local_rank = int(os.environ["LOCAL_RANK"])
         config.n_gpus = int(os.environ.get("LOCAL_WORLD_SIZE", config.n_gpus))  # pyright: ignore[reportArgumentType]
         total_world_size = int(os.environ["WORLD_SIZE"])
         config.n_nodes = total_world_size // config.n_gpus
+        print(
+            f"torchrun with local_rank {local_rank}, n_gpus {config.n_gpus}, n_nodes {config.n_nodes}"
+        )
         main(local_rank, config)
     elif config.n_gpus * config.n_nodes > 1:
+        print(
+            f"run with torch.multiprocessing.spawn with n_gpus {config.n_gpus}, n_nodes {config.n_nodes}"
+        )
         mp.spawn(main, args=(config,), nprocs=config.n_gpus, join=True)  # pyright: ignore[reportPrivateImportUsage, reportAttributeAccessIssue]
     else:
+        print("run without distributed training")
         main(0, config)
