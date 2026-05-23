@@ -1,5 +1,6 @@
 import gc
 import os
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -31,7 +32,9 @@ LOSS_FN_MAP = {"l2": mse_loss, "l1": l1_loss}
 def setup_ddp(local_rank: int, global_rank: int, world_size: int) -> None:
     os.environ.setdefault("MASTER_ADDR", "localhost")
     os.environ.setdefault("MASTER_PORT", "12355")
-    dist.init_process_group("nccl", rank=global_rank, world_size=world_size)
+    dist.init_process_group(
+        "nccl", rank=global_rank, world_size=world_size, timeout=timedelta(hours=2)
+    )
     torch.cuda.set_device(local_rank)
 
 
@@ -231,6 +234,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         dataloaders["video_validation"].reset_stream(),
                         save_path=config.plot_dir / f"driving_video_step_{step}.mp4",
                         device=device,
+                        time_step=config.plot_time_step,
+                        num_timesteps=model.num_timesteps,
                     )
                     wandb.log(
                         {
@@ -264,6 +269,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                             dataloaders["video_test"].reset_stream(),
                             save_path=config.plot_dir / "best_driving_video.mp4",
                             device=device,
+                            time_step=config.plot_time_step,
+                            num_timesteps=model.num_timesteps,
                         )
                         wandb.log(
                             {
@@ -336,6 +343,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
             dataloaders["video_test"].reset_stream(),
             save_path=config.plot_dir / "final_driving_video.mp4",
             device=device,
+            time_step=config.plot_time_step,
+            num_timesteps=model.num_timesteps,
         )
         wandb.log(
             {

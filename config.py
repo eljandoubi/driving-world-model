@@ -38,6 +38,7 @@ class TrainingConfig:
     n_nodes: int = 1
     node_rank: int = 0
     buffer_size: int = 1000
+    plot_time_step: int = 25
     runs_dir: str | Path = "runs"
     checkpoint_dir: Path = Path("checkpoints")
     plot_dir: Path = Path("plots")

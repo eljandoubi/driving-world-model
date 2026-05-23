@@ -27,7 +27,7 @@ def plot_video(
     num_frames: int = 600,
     fps: int = 10,
     device: torch.device | str = "cpu",
-    time_step: int = 10,
+    time_step: int = 25,
     num_timesteps: int = 1000,
 ) -> Path:
     model.eval()
