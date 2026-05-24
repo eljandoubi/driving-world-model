@@ -22,14 +22,12 @@ def validate_model(
     model.eval()
     cum_loss = torch.zeros(2, device=device, dtype=torch.float32)
 
-    pbar = tqdm(
-        enumerate(dataloader, start=1),
+    for batch in tqdm(
+        dataloader,
         desc="validate",
         total=len(dataloader),
         disable=not is_main,
-    )
-
-    for _, batch in pbar:
+    ):
         batch = batch.to(device, non_blocking=True)
         pred_delta = model(batch["a_t"], batch["x_t"])
         target_delta = batch["x_tp1"] - batch["x_t"]
