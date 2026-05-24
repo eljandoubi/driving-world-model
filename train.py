@@ -117,6 +117,8 @@ def main(local_rank: int, config: TrainingConfig) -> None:
         dropout=config.dropout,
     ).to(device, non_blocking=True)
 
+    num_timesteps = raw_model.num_timesteps
+
     if world_size > 1:
         model = DDP(raw_model, device_ids=[local_rank])
     else:
@@ -235,7 +237,7 @@ def main(local_rank: int, config: TrainingConfig) -> None:
                         save_path=config.plot_dir / f"driving_video_step_{step}.mp4",
                         device=device,
                         time_step=config.plot_time_step,
-                        num_timesteps=model.num_timesteps,
+                        num_timesteps=num_timesteps,
                     )
                     wandb.log(
                         {
