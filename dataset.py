@@ -53,6 +53,7 @@ class StreamDataset:
         self.buffer_size = buffer_size
         self.pin_memory = pin_memory
         self.logger = setup_logging(rank=rank)
+        self.split = split
 
         self.trans = transforms.Compose(
             [
@@ -63,11 +64,11 @@ class StreamDataset:
         )
 
     def reset_stream(self):
-        self.logger.info(f"Resetting stream for rank {self.rank}...")
+        self.logger.info(f"Resetting {self.split} stream for rank {self.rank}...")
         self.stream = deepcopy(self.main_stream)
         if self.world_size > 1:
             self.logger.info(
-                f"Sharding dataset across {self.world_size} processes..., rank {self.rank}"
+                f"Sharding {self.split} dataset across {self.world_size} processes..., rank {self.rank}"
             )
             self.stream = self.stream.shard(num_shards=self.world_size, index=self.rank)
 
@@ -93,7 +94,7 @@ class StreamDataset:
         run_id = ""
         if self._counter > 0:
             self.logger.warning(
-                f"Resuming stream from step {self.initial_step} (counter={self._counter}) for rank {self.rank}..."
+                f"Resuming {self.split} stream from step {self.initial_step} (counter={self._counter}) for rank {self.rank}..."
             )
         for i, it in enumerate(self.stream):
             if i < self._counter:
@@ -113,14 +114,16 @@ class StreamDataset:
 
         if self._len is None:
             self._len = self._counter // self.batch_size
-            self.logger.info(f"Computed dataset length: {self._len}")
+            self.logger.info(
+                f"Computed {self.split} dataset length for rank {self.rank}: {self._len} "
+            )
 
         self._counter = 0
 
     def __len__(self):
         if self._len is None:
             self.logger.warning(
-                f"Length of dataset not known yet; returning estimated length {self._len_estimated}"
+                f"Length of {self.split} dataset not known yet for rank {self.rank}; returning estimated length {self._len_estimated}"
             )
             return self._len_estimated
         return self._len
