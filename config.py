@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from math import ceil
-from os import getenv
 from pathlib import Path
 from typing import Literal
 
@@ -36,7 +35,6 @@ class TrainingConfig:
     scheduler_t_mult: int = 2
     n_gpus: int = 1
     n_nodes: int = 1
-    node_rank: int = 0
     buffer_size: int = 1000
     plot_time_step: int = 25
     runs_dir: str | Path = "runs"
@@ -49,9 +47,6 @@ class TrainingConfig:
 
         assert self.n_gpus > 0, "n_gpus must be > 0"
         assert self.n_nodes > 0, "n_nodes must be > 0"
-        assert self.node_rank >= 0 and self.node_rank < self.n_nodes, (
-            f"node_rank must be in [0, n_nodes); got {self.node_rank}"
-        )
         assert self.num_tokens > 0, "num_tokens must be > 0"
         assert self.hidden_dim > 0, "hidden_dim must be > 0"
         assert self.activation in (
@@ -87,8 +82,6 @@ class TrainingConfig:
         assert self.checkpoint_every % self.log_every == 0, (
             "checkpoint_every must be a multiple of log_every"
         )
-        if getenv("RANK") is not None:
-            self.node_rank = int(getenv("RANK")) // self.n_gpus  # pyright: ignore[reportArgumentType]
         count = float(self.n_gpus * self.n_nodes * self.batch_size)
         self.log_every = int(ceil(self.log_every / count))
         self.checkpoint_every = int(ceil(self.checkpoint_every / count))

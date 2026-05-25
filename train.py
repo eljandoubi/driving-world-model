@@ -4,7 +4,6 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 import wandb
 from dotenv import load_dotenv
 from torch.nn.functional import l1_loss, mse_loss
@@ -29,12 +28,10 @@ load_dotenv()
 LOSS_FN_MAP = {"l2": mse_loss, "l1": l1_loss}
 
 
-def setup_ddp(local_rank: int, global_rank: int, world_size: int) -> None:
-    os.environ.setdefault("MASTER_ADDR", "localhost")
-    os.environ.setdefault("MASTER_PORT", "12355")
-    dist.init_process_group(
-        "nccl", rank=global_rank, world_size=world_size, timeout=timedelta(hours=2)
-    )
+def setup_ddp(local_rank: int = 0) -> None:
+
+    dist.init_process_group(backend="nccl", timeout=timedelta(hours=2))
+
     torch.cuda.set_device(local_rank)
 
 
@@ -42,14 +39,14 @@ def cleanup_ddp() -> None:
     dist.destroy_process_group()
 
 
-def main(local_rank: int, config: TrainingConfig) -> None:
-    world_size = config.n_gpus * config.n_nodes
-    global_rank = config.node_rank * config.n_gpus + local_rank
-    print("local_rank", local_rank, "global_rank", global_rank)
+def main(
+    local_rank: int, global_rank: int, world_size: int, config: TrainingConfig
+) -> None:
+
     is_main = global_rank == 0
 
     if world_size > 1:
-        setup_ddp(local_rank, global_rank, world_size)
+        setup_ddp(local_rank)
         device = torch.device(f"cuda:{local_rank}")
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -368,22 +365,19 @@ if __name__ == "__main__":
     parser = HfArgumentParser(TrainingConfig)  # pyright: ignore[reportArgumentType]
     config = parser.parse_args_into_dataclasses()[0]
 
-    if "LOCAL_RANK" in os.environ:
-        print("run with torchrun")
-        # Launched via torchrun — env vars override config
-        local_rank = int(os.environ["LOCAL_RANK"])
-        config.n_gpus = int(os.environ.get("LOCAL_WORLD_SIZE", config.n_gpus))  # pyright: ignore[reportArgumentType]
-        total_world_size = int(os.environ["WORLD_SIZE"])
-        config.n_nodes = total_world_size // config.n_gpus
-        print(
-            f"torchrun with local_rank {local_rank}, n_gpus {config.n_gpus}, n_nodes {config.n_nodes}"
-        )
-        main(local_rank, config)
-    elif config.n_gpus * config.n_nodes > 1:
-        print(
-            f"run with torch.multiprocessing.spawn with n_gpus {config.n_gpus}, n_nodes {config.n_nodes}"
-        )
-        mp.spawn(main, args=(config,), nprocs=config.n_gpus, join=True)  # pyright: ignore[reportPrivateImportUsage, reportAttributeAccessIssue]
-    else:
-        print("run without distributed training")
-        main(0, config)
+    # Ensure the user is launching the script via torchrun (launch.sh)
+    if "LOCAL_RANK" not in os.environ:
+        print("❌ ERROR: You must launch this script using torchrun or launch.sh!")
+        print("Run it locally like this: uv run torchrun --nproc_per_node=1 train.py")
+        exit(1)
+
+    # Read the ground-truth topology that torchrun generated
+    local_rank = int(os.environ["LOCAL_RANK"])
+    global_rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+
+    if global_rank == 0:
+        print(f"🚀 torchrun initialized with world_size={world_size}")
+
+    # Start training!
+    main(local_rank, global_rank, world_size, config)

@@ -125,7 +125,6 @@ torchrun --nproc_per_node=4 --nnodes=2 --node_rank=1 \
 |-----------|---------|-------------|
 | `n_gpus` | `1` | GPUs per node |
 | `n_nodes` | `1` | Number of nodes (machines) |
-| `node_rank` | `0` | This node's rank (0-indexed) |
 
 ### Data
 
