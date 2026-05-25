@@ -43,6 +43,7 @@ def main(
     local_rank: int, global_rank: int, world_size: int, config: TrainingConfig
 ) -> None:
 
+    assert world_size < 1, "wold_size must be >= 1"
     is_main = global_rank == 0
 
     if world_size > 1:
@@ -116,17 +117,35 @@ def main(
 
     num_timesteps = raw_model.num_timesteps
 
+    # 1. Wrap raw_model with DDP if multi-GPU
     if world_size > 1:
         model = DDP(raw_model, device_ids=[local_rank])
-    else:
-        model = raw_model
 
-    try:
-        model = torch.compile(model)
-    except Exception as e:
-        logger.warning(
-            f"torch.compile failed with error: {e}. Continuing without compilation."
-        )
+        # Compile the training DDP model
+        try:
+            model = torch.compile(model)
+            logger.info("Compiled DDP model for training.")
+        except Exception as e:
+            logger.warning(f"torch.compile failed on training DDP model: {e}")
+
+        # Compile a separate, raw wrapper for single-rank plotting (bypasses DDP)
+        try:
+            compiled_raw_model = torch.compile(raw_model)
+            logger.info("Compiled raw model for plotting.")
+        except Exception as e:
+            logger.warning(f"torch.compile failed on plotting raw model: {e}")
+            compiled_raw_model = raw_model
+    else:
+        # 2. Single GPU Setup (No DDP)
+        try:
+            model = torch.compile(raw_model)
+            # Both training and plotting point to the same compiled raw model
+            compiled_raw_model = model
+            logger.info("Compiled model for training and plotting.")
+        except Exception as e:
+            logger.warning(f"torch.compile failed on raw model: {e}")
+            model = raw_model
+            compiled_raw_model = raw_model
 
     optimizer = AdamW(model.parameters(), lr=config.learning_rate)
     scheduler = CosineAnnealingWarmRestarts(
@@ -237,14 +256,14 @@ def main(
                     wandb.save(str(ckpt_path), base_path=str(config.run_dir))
                     if step % (config.checkpoint_every * world_size) == 0:
                         video_path = plot_video(
-                            raw_model,
+                            compiled_raw_model,  # pyright: ignore[reportArgumentType]
                             dataloaders["video_validation"].reset_stream(),
                             save_path=config.plot_dir
                             / f"driving_video_step_{step}.mp4",
                             device=device,
                             time_step=config.plot_time_step,
                             num_timesteps=num_timesteps,
-                            num_frames=100,  # use fewer frames for intermediate videos to save time
+                            num_frames=100,
                         )
                         wandb.log(
                             {
@@ -330,9 +349,15 @@ def main(
         rank=global_rank,
         world_size=world_size,
     )
+
+    logger.info("Training complete.")
+
+    if world_size > 1:
+        cleanup_ddp()
+
     if is_main:
         final_video_path = plot_video(
-            raw_model,
+            compiled_raw_model,  # pyright: ignore[reportArgumentType]
             dataloaders["video_test"].reset_stream(),
             save_path=config.plot_dir / "final_driving_video.mp4",
             device=device,
@@ -348,11 +373,6 @@ def main(
         )
 
         wandb.finish()
-
-    logger.info("Training complete.")
-
-    if world_size > 1:
-        cleanup_ddp()
 
 
 if __name__ == "__main__":
