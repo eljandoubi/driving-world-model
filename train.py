@@ -30,7 +30,7 @@ LOSS_FN_MAP = {"l2": mse_loss, "l1": l1_loss}
 
 def setup_ddp(local_rank: int = 0) -> None:
 
-    dist.init_process_group(backend="nccl", timeout=timedelta(hours=2))
+    dist.init_process_group(backend="nccl", timeout=timedelta(hours=4))
 
     torch.cuda.set_device(local_rank)
 
@@ -121,6 +121,13 @@ def main(
     else:
         model = raw_model
 
+    try:
+        model = torch.compile(model)
+    except Exception as e:
+        logger.warning(
+            f"torch.compile failed with error: {e}. Continuing without compilation."
+        )
+
     optimizer = AdamW(model.parameters(), lr=config.learning_rate)
     scheduler = CosineAnnealingWarmRestarts(
         optimizer, T_0=config.scheduler_t0, T_mult=config.scheduler_t_mult
@@ -200,7 +207,7 @@ def main(
                 torch.cuda.empty_cache()  # clear CUDA cache before validation
 
                 val_loss = validate_model(
-                    model,
+                    model,  # pyright: ignore[reportArgumentType]
                     dataloaders["validation"].reset_stream(),
                     device,
                     loss_fn,
@@ -228,22 +235,25 @@ def main(
 
                 if is_main:
                     wandb.save(str(ckpt_path), base_path=str(config.run_dir))
-                    video_path = plot_video(
-                        raw_model,
-                        dataloaders["video_validation"].reset_stream(),
-                        save_path=config.plot_dir / f"driving_video_step_{step}.mp4",
-                        device=device,
-                        time_step=config.plot_time_step,
-                        num_timesteps=num_timesteps,
-                    )
-                    wandb.log(
-                        {
-                            "video/prediction": wandb.Video(
-                                str(video_path), format="mp4"
-                            )
-                        },
-                        step=step,
-                    )
+                    if step % (config.checkpoint_every * world_size) == 0:
+                        video_path = plot_video(
+                            raw_model,
+                            dataloaders["video_validation"].reset_stream(),
+                            save_path=config.plot_dir
+                            / f"driving_video_step_{step}.mp4",
+                            device=device,
+                            time_step=config.plot_time_step,
+                            num_timesteps=num_timesteps,
+                            num_frames=100,  # use fewer frames for intermediate videos to save time
+                        )
+                        wandb.log(
+                            {
+                                "video/prediction": wandb.Video(
+                                    str(video_path), format="mp4"
+                                )
+                            },
+                            step=step,
+                        )
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -263,22 +273,6 @@ def main(
 
                     if is_main:
                         wandb.save(str(best_ckpt_path), base_path=str(config.run_dir))
-                        best_video_path = plot_video(
-                            raw_model,
-                            dataloaders["video_test"].reset_stream(),
-                            save_path=config.plot_dir / "best_driving_video.mp4",
-                            device=device,
-                            time_step=config.plot_time_step,
-                            num_timesteps=model.num_timesteps,
-                        )
-                        wandb.log(
-                            {
-                                "video/best_prediction": wandb.Video(
-                                    str(best_video_path), format="mp4"
-                                )
-                            },
-                            step=step,
-                        )
 
                 if early_stopping.step(val_loss):
                     if is_main:
@@ -310,7 +304,7 @@ def main(
     gc.collect()  # collect garbage before validation to free up memory
     torch.cuda.empty_cache()  # clear CUDA cache before validation
     test_loss = validate_model(
-        model,
+        model,  # pyright: ignore[reportArgumentType]
         dataloaders["test"].reset_stream(),
         device,
         loss_fn,

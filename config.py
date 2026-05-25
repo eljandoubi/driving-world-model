@@ -36,7 +36,7 @@ class TrainingConfig:
     n_gpus: int = 1
     n_nodes: int = 1
     buffer_size: int = 1000
-    plot_time_step: int = 25
+    plot_time_step: int = 100
     runs_dir: str | Path = "runs"
     checkpoint_dir: Path = Path("checkpoints")
     plot_dir: Path = Path("plots")
