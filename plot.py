@@ -18,6 +18,8 @@ if torch.cuda.is_available():
 def _denormalize(tensor: torch.Tensor) -> torch.Tensor:
     """(C, H, W) normalized tensor -> (H, W, 3) RGB clipped to [0, 1]."""
     tensor = tensor.squeeze(0)
+    MEAN = MEAN.to(tensor.device, non_blocking=True)  # type: ignore  # noqa: F823
+    STD = STD.to(tensor.device, non_blocking=True)  # type: ignore  # noqa: F823
     img = tensor * STD[:, None, None] + MEAN[:, None, None]
     img = img[:3].clamp(0, 1).permute(1, 2, 0)
     return img.to("cpu", non_blocking=True)
