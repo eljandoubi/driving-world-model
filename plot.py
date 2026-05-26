@@ -10,17 +10,14 @@ from dataset import StreamDataset
 
 MEAN = torch.tensor([0.4738, 0.4824, 0.4592, 1.0000])
 STD = torch.tensor([0.2823, 0.2809, 0.2801, 1e-8])
-if torch.cuda.is_available():
-    MEAN = MEAN.cuda(non_blocking=True)
-    STD = STD.cuda(non_blocking=True)
 
 
-def _denormalize(tensor: torch.Tensor) -> torch.Tensor:
+def _denormalize(
+    tensor: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
+) -> torch.Tensor:
     """(C, H, W) normalized tensor -> (H, W, 3) RGB clipped to [0, 1]."""
     tensor = tensor.squeeze(0)
-    MEAN = MEAN.to(tensor.device, non_blocking=True)  # type: ignore  # noqa: F823
-    STD = STD.to(tensor.device, non_blocking=True)  # type: ignore  # noqa: F823
-    img = tensor * STD[:, None, None] + MEAN[:, None, None]
+    img = tensor * std[:, None, None] + mean[:, None, None]
     img = img[:3].clamp(0, 1).permute(1, 2, 0)
     return img.to("cpu", non_blocking=True)
 
@@ -47,6 +44,9 @@ def plot_video(
     else:
         amp_dtype = torch.bfloat16  # CPU supports BF16 in PyTorch 2.x
 
+    mean = MEAN.to(device, non_blocking=True)
+    std = STD.to(device, non_blocking=True)
+
     fig, (ax_gt, ax_pred) = plt.subplots(1, 2, figsize=(8, 4))
     ax_gt.set_axis_off()
     ax_pred.set_axis_off()
@@ -71,8 +71,8 @@ def plot_video(
 
             x = x + pred_delta.float()
 
-        gt_img = _denormalize(data["x_tp1"])
-        pred_img = _denormalize(x)
+        gt_img = _denormalize(data["x_tp1"], mean, std)
+        pred_img = _denormalize(x, mean, std)
         frames.append((gt_img, pred_img))
 
         try:
