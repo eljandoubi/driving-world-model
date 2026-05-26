@@ -22,6 +22,8 @@ from model import WorldModel
 from plot import plot_video
 from validate import tqdm, validate_model
 
+torch.set_float32_matmul_precision("high")
+
 os.environ["WANDB_DISABLE_SYMLINKS"] = "true"
 load_dotenv()
 
