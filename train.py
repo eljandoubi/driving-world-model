@@ -45,7 +45,7 @@ def main(
     local_rank: int, global_rank: int, world_size: int, config: TrainingConfig
 ) -> None:
 
-    assert world_size < 1, "wold_size must be >= 1"
+    assert world_size >= 1, "wold_size must be >= 1"
     is_main = global_rank == 0
 
     if world_size > 1:
