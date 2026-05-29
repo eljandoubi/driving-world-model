@@ -204,6 +204,7 @@ def main(
             loss.backward()
             clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
             optimizer.step()
+            scheduler.step(epoch + i / total)  # pyright: ignore[reportArgumentType]
 
             if is_main:
                 loss_value = loss.item()
@@ -319,8 +320,6 @@ def main(
 
         if stopped:
             break
-
-        scheduler.step()
 
     gc.collect()  # collect garbage before validation to free up memory
     torch.cuda.empty_cache()  # clear CUDA cache before validation

@@ -49,6 +49,7 @@ class StreamDataset:
         self._len_estimated = int(ceil(num_examples / float(world_size * batch_size)))
         self._len = None
         self._counter = 0
+        self._flag = True
         self.batch_size = batch_size
         self.buffer_size = buffer_size
         self.pin_memory = pin_memory
@@ -122,10 +123,12 @@ class StreamDataset:
 
     def __len__(self):
         if self._len is None:
-            self.logger.warning(
-                f"Length of {self.split} dataset not known yet for rank {self.rank}; returning estimated length {self._len_estimated}"
-            )
-            return self._len_estimated
+            if self._flag:
+                self.logger.warning(
+                    f"Length of {self.split} dataset not known yet for rank {self.rank}; returning estimated length {self._len_estimated}"
+                )
+                self._flag = False
+            return max(self._len_estimated, self._counter)
         return self._len
 
     def _collate_fn(self, batch: dict[str, list[torch.Tensor]]) -> TensorDict:
