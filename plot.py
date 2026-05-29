@@ -71,7 +71,7 @@ def plot_video(
 
             x = x + pred_delta.float()
 
-        gt_img = _denormalize(data["x_tp1"], mean, std)
+        gt_img = _denormalize(data["x_tp1"].to(device, non_blocking=True), mean, std)
         pred_img = _denormalize(x, mean, std)
         frames.append((gt_img, pred_img))
 
